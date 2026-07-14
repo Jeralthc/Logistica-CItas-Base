@@ -62,7 +62,7 @@ onMounted(() => {
         <template #header>
             <div class="flex items-center justify-between">
                 <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                    Módulo de <span class="text-red-600">Categorías de Carga y Tiempos</span>
+                    Módulo de <span class="text-indigo-600">Categorías de Carga y Tiempos</span>
                 </h2>
             </div>
         </template>
@@ -76,8 +76,8 @@ onMounted(() => {
                     <p class="font-bold text-sm">{{ mensajeExito }}</p>
                 </div>
 
-                <div v-if="mensajeError" class="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-2xl flex items-center gap-3">
-                    <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div v-if="mensajeError" class="mb-6 p-4 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-2xl flex items-center gap-3">
+                    <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     <p class="font-bold text-sm">{{ mensajeError }}</p>
                 </div>
 
@@ -93,7 +93,7 @@ onMounted(() => {
                     </div>
 
                     <div v-if="cargando" class="p-12 text-center">
-                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mx-auto mb-4"></div>
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
                         <p class="text-slate-500 font-medium">Cargando categorías...</p>
                     </div>
 
@@ -111,7 +111,7 @@ onMounted(() => {
                                 <tr v-for="categoria in categorias" :key="categoria.id" class="hover:bg-slate-50/50 transition-colors">
                                     <td class="px-6 py-5">
                                         <div class="flex items-center gap-3">
-                                            <div class="h-10 w-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 border border-red-100">
+                                            <div class="h-10 w-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 border border-indigo-100">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
                                             </div>
                                             <div>
@@ -122,7 +122,7 @@ onMounted(() => {
                                     <td class="px-6 py-5">
                                         <div class="relative max-w-[120px]">
                                             <input v-model="categoria.tiempo_fijo" type="number" step="1" min="0"
-                                                class="block w-full pl-3 pr-10 py-2.5 text-sm font-bold text-slate-800 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-600/20 focus:border-red-600 transition-all shadow-sm">
+                                                class="block w-full pl-3 pr-10 py-2.5 text-sm font-bold text-slate-800 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 transition-all shadow-sm">
                                             <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                                                 <span class="text-xs text-slate-400 font-bold">min</span>
                                             </div>
@@ -131,7 +131,7 @@ onMounted(() => {
                                     <td class="px-6 py-5">
                                         <div class="relative max-w-[150px]">
                                             <input v-model="categoria.velocidad_descarga" type="number" step="0.01" min="0"
-                                                class="block w-full pl-3 pr-12 py-2.5 text-sm font-bold text-slate-800 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-600/20 focus:border-red-600 transition-all shadow-sm">
+                                                class="block w-full pl-3 pr-12 py-2.5 text-sm font-bold text-slate-800 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-600/20 focus:border-indigo-600 transition-all shadow-sm">
                                             <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                                                 <span class="text-xs text-slate-400 font-bold">ton/min</span>
                                             </div>
@@ -139,7 +139,7 @@ onMounted(() => {
                                     </td>
                                     <td class="px-6 py-5 text-right">
                                         <button @click="guardarCategoria(categoria)" :disabled="guardando === categoria.id"
-                                            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-600 transition-all duration-300 shadow-md hover:shadow-lg active:scale-95 disabled:opacity-50 w-full">
+                                            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-indigo-600 transition-all duration-300 shadow-md hover:shadow-lg active:scale-95 disabled:opacity-50 w-full">
                                             <svg v-if="guardando === categoria.id" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                                             <span v-if="guardando === categoria.id">Guardando</span>
                                             <span v-else>Guardar</span>

@@ -310,7 +310,7 @@ const categoriaPorFactor = (factor) => {
         1: { texto: 'Grande', color: 'bg-emerald-100 text-emerald-700', icono: '📦' },
         2: { texto: 'Mediano', color: 'bg-blue-100 text-blue-700', icono: '📋' },
         3: { texto: 'Pequeño', color: 'bg-amber-100 text-amber-700', icono: '📎' },
-        4: { texto: 'Micro', color: 'bg-red-100 text-red-700', icono: '🔸' },
+        4: { texto: 'Micro', color: 'bg-indigo-100 text-indigo-700', icono: '🔸' },
     };
     return c[factor] || { texto: 'N/A', color: 'bg-slate-100 text-slate-600', icono: '❓' };
 };
@@ -338,7 +338,7 @@ const formatRangoHora = (fechaInicio, duracionMinutos) => {
 };
 
 const statusColor = (s) => {
-    const m = { DWT: 'bg-amber-100 text-amber-700', DPE: 'bg-blue-100 text-blue-700', DCO: 'bg-emerald-100 text-emerald-700', DAN: 'bg-red-100 text-red-700' };
+    const m = { DWT: 'bg-amber-100 text-amber-700', DPE: 'bg-blue-100 text-blue-700', DCO: 'bg-emerald-100 text-emerald-700', DAN: 'bg-indigo-100 text-indigo-700' };
     return m[s] || 'bg-slate-100 text-slate-600';
 };
 
@@ -347,7 +347,7 @@ const citaStatusColor = (s) => {
         programada: 'bg-amber-100 text-amber-700', 
         'en muelle': 'bg-blue-100 text-blue-700', 
         finalizada: 'bg-emerald-100 text-emerald-700', 
-        cancelada: 'bg-red-100 text-red-700' 
+        cancelada: 'bg-indigo-100 text-indigo-700' 
     };
     return m[s] || 'bg-slate-100 text-slate-600';
 };
@@ -406,8 +406,8 @@ const getSucursalNombre = (codigo) => {
         <template #header>
             <div class="flex items-center justify-between print:hidden">
                 <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                    <span v-if="$page.props.auth.user.role === 'proveedor'">Portal del Proveedor <span class="text-red-600">| Mis Citas</span></span>
-                    <span v-else>Módulo de Recepción <span class="text-red-600">| Control de Citas</span></span>
+                    <span v-if="$page.props.auth.user.role === 'proveedor'">Portal del Proveedor <span class="text-indigo-600">| Mis Citas</span></span>
+                    <span v-else>Módulo de Recepción <span class="text-indigo-600">| Control de Citas</span></span>
                 </h2>
                 <div class="text-sm font-medium text-slate-500 bg-slate-100 px-4 py-1 rounded-full border border-slate-200">
                     Sincronizado con ERP
@@ -421,7 +421,7 @@ const getSucursalNombre = (codigo) => {
                 <!-- BÚSQUEDA -->
                 <div v-if="$page.props.auth.user.role !== 'proveedor'" class="bg-white overflow-hidden shadow-xl shadow-slate-200/50 sm:rounded-3xl p-8 mb-8 border border-slate-100">
                     <div class="max-w-xl">
-                        <h3 class="text-sm font-bold text-red-600 uppercase tracking-widest mb-2">Búsqueda rápida</h3>
+                        <h3 class="text-sm font-bold text-indigo-600 uppercase tracking-widest mb-2">Búsqueda rápida</h3>
                         <p class="text-slate-500 mb-6">Ingrese el número de la Orden de Compra para calcular tiempos y ciclos de descarga.</p>
                         <div class="flex gap-3">
                             <div class="relative flex-grow">
@@ -429,15 +429,15 @@ const getSucursalNombre = (codigo) => {
                                     <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 </span>
                                 <input v-model="numeroOrden" @keyup.enter="buscarOrden" type="text" placeholder="Ej: E00001167"
-                                    class="block w-full pl-11 pr-4 py-3 border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-2xl transition-all shadow-sm">
+                                    class="block w-full pl-11 pr-4 py-3 border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-2xl transition-all shadow-sm">
                             </div>
                             <button @click="buscarOrden" :disabled="cargando"
-                                class="bg-red-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95 disabled:opacity-50">
+                                class="bg-indigo-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 disabled:opacity-50">
                                 <span v-if="cargando">Buscando...</span>
                                 <span v-else>BUSCAR</span>
                             </button>
                         </div>
-                        <p v-if="errorMensaje" class="text-red-500 font-medium mt-3 text-sm">⚠️ {{ errorMensaje }}</p>
+                        <p v-if="errorMensaje" class="text-indigo-500 font-medium mt-3 text-sm">⚠️ {{ errorMensaje }}</p>
                     </div>
                 </div>
 
@@ -450,7 +450,7 @@ const getSucursalNombre = (codigo) => {
                                     <span v-if="$page.props.auth.user.role === 'proveedor'">🚚 Mis Citas Agendadas</span>
                                     <span v-else>📋 Citas Agendadas</span>
                                 </h3>
-                                <a v-if="$page.props.auth.user.role === 'proveedor'" href="/reservar-cita" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg shadow-red-500/30 transition-all flex items-center gap-1 ml-4">
+                                <a v-if="$page.props.auth.user.role === 'proveedor'" href="/reservar-cita" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg shadow-indigo-500/30 transition-all flex items-center gap-1 ml-4">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                                     AGENDAR NUEVA CITA
                                 </a>
@@ -471,12 +471,12 @@ const getSucursalNombre = (codigo) => {
                     <div class="flex border-b border-slate-100 bg-slate-50 px-8 py-2 gap-4">
                         <button @click="cambiarPestanaCitas('activas')" 
                             class="text-xs font-bold uppercase tracking-wider py-2 border-b-2 transition-all font-mono"
-                            :class="pestanaCitas === 'activas' ? 'border-red-600 text-red-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
+                            :class="pestanaCitas === 'activas' ? 'border-indigo-600 text-indigo-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
                             Activas
                         </button>
                         <button @click="cambiarPestanaCitas('finalizadas')" 
                             class="text-xs font-bold uppercase tracking-wider py-2 border-b-2 transition-all font-mono"
-                            :class="pestanaCitas === 'finalizadas' ? 'border-red-600 text-red-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
+                            :class="pestanaCitas === 'finalizadas' ? 'border-indigo-600 text-indigo-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
                             Finalizadas (Historial)
                         </button>
                     </div>
@@ -520,9 +520,9 @@ const getSucursalNombre = (codigo) => {
                             class="px-4 sm:px-8 py-5 flex flex-col md:flex-row items-start md:items-center justify-between hover:bg-slate-50/70 transition-colors group gap-4 md:gap-0">
                             <div class="flex items-start sm:items-center gap-4 sm:gap-5 w-full md:w-auto">
                                 <!-- Bloque Fecha grande -->
-                                <div class="w-16 h-16 flex-shrink-0 bg-red-50 rounded-2xl flex flex-col items-center justify-center border border-red-100">
-                                    <span class="text-[10px] font-bold text-red-400 uppercase">{{ new Date(cita.fecha_cita).toLocaleDateString('es-VE', { month: 'short' }) }}</span>
-                                    <span class="text-2xl font-black text-red-600 -mt-0.5">{{ new Date(cita.fecha_cita).getDate() }}</span>
+                                <div class="w-16 h-16 flex-shrink-0 bg-indigo-50 rounded-2xl flex flex-col items-center justify-center border border-indigo-100">
+                                    <span class="text-[10px] font-bold text-indigo-400 uppercase">{{ new Date(cita.fecha_cita).toLocaleDateString('es-VE', { month: 'short' }) }}</span>
+                                    <span class="text-2xl font-black text-indigo-600 -mt-0.5">{{ new Date(cita.fecha_cita).getDate() }}</span>
                                 </div>
 
                                 <div class="min-w-0 flex-1">
@@ -600,7 +600,7 @@ const getSucursalNombre = (codigo) => {
                                     Reprogramar
                                 </button>
                                 <button @click="numeroOrden = cita.numero_oc; buscarOrden()"
-                                    class="w-full sm:w-auto justify-center bg-red-600 text-white px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    class="w-full sm:w-auto justify-center bg-indigo-600 text-white px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
                                     Ver Detalle
                                 </button>
                             </div>
@@ -611,7 +611,7 @@ const getSucursalNombre = (codigo) => {
                                     Reprogramar
                                 </button>
                                 <button @click="abrirModalCancelar(cita)"
-                                    class="w-full sm:w-auto justify-center bg-red-50 text-red-600 border border-red-200 px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-red-100 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    class="w-full sm:w-auto justify-center bg-indigo-50 text-indigo-600 border border-indigo-200 px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                     Cancelar Cita
                                 </button>
@@ -633,13 +633,13 @@ const getSucursalNombre = (codigo) => {
                         <!-- Header proveedor -->
                         <div class="bg-slate-900 p-8 text-white flex justify-between items-start">
                             <div>
-                                <span class="bg-red-600 text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter mb-2 inline-block">Proveedor Verificado</span>
+                                <span class="bg-indigo-600 text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter mb-2 inline-block">Proveedor Verificado</span>
                                 <h3 class="text-3xl font-black">{{ datosOrden.Nombre_Proveedor }}</h3>
                                 <p class="text-slate-400 font-medium mt-1">RIF: {{ datosOrden.Codigo_Proveedor }}</p>
                             </div>
                             <div class="text-right">
                                 <p class="text-slate-400 text-sm font-bold uppercase tracking-widest">Documento</p>
-                                <p class="text-2xl font-mono font-bold text-red-500">{{ datosOrden.Numero_OC }}</p>
+                                <p class="text-2xl font-mono font-bold text-indigo-500">{{ datosOrden.Numero_OC }}</p>
                                 <span v-if="datosExtra" :class="statusColor(datosExtra.status_orden)"
                                     class="inline-block mt-2 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
                                     {{ datosExtra.status_texto }}
@@ -696,10 +696,10 @@ const getSucursalNombre = (codigo) => {
 
                                 <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Detalle de Mercancía</h4>
                                 <div class="flex items-center gap-3 cursor-pointer group hover:bg-slate-50 -mx-2 px-2 py-1 rounded-xl transition-all" @click="abrirModalSKU">
-                                    <div class="h-10 w-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 font-bold group-hover:bg-red-100 group-hover:text-red-600 transition-colors">{{ datosOrden.Total_SKUs }}</div>
+                                    <div class="h-10 w-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 font-bold group-hover:bg-indigo-100 group-hover:text-indigo-600 transition-colors">{{ datosOrden.Total_SKUs }}</div>
                                     <div>
                                         <p class="text-sm text-slate-600 font-bold uppercase">Variedad de Productos</p>
-                                        <p class="text-[10px] text-red-500 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Clic para ver detalle →</p>
+                                        <p class="text-[10px] text-indigo-500 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Clic para ver detalle →</p>
                                     </div>
                                 </div>
                                 <div v-if="datosOrden.Total_Cajas_Fisicas > 0" class="flex items-center gap-3">
@@ -761,7 +761,7 @@ const getSucursalNombre = (codigo) => {
                                     <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Verduras</p>
                                 </div>
                                 <button @click="abrirModalSKU"
-                                    class="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-600 transition-all duration-300 shadow-md hover:shadow-lg active:scale-95">
+                                    class="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-indigo-600 transition-all duration-300 shadow-md hover:shadow-lg active:scale-95">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
                                     Ver detalle Productos
                                 </button>
@@ -785,12 +785,12 @@ const getSucursalNombre = (codigo) => {
                                     <div class="text-center">
                                         <p class="text-xs text-slate-500 font-black uppercase mb-1">Ciclos de Descarga</p>
                                         <p class="text-5xl font-black text-slate-900">{{ Math.round(datosOrden.Ciclos_Necesarios) }}</p>
-                                        <p class="text-[10px] text-red-600 font-bold mt-1 uppercase">Viajes estimados</p>
+                                        <p class="text-[10px] text-indigo-600 font-bold mt-1 uppercase">Viajes estimados</p>
                                     </div>
                                     <div class="h-12 w-[1px] bg-slate-200"></div>
                                     <div class="text-center">
                                         <p class="text-xs text-slate-500 font-black uppercase mb-1">Sucursal Sugerida</p>
-                                        <p class="text-3xl font-black text-red-600 truncate max-w-[150px] mx-auto" :title="getSucursalNombre(datosOrden.Muelle_Destino)">{{ getSucursalNombre(datosOrden.Muelle_Destino) }}</p>
+                                        <p class="text-3xl font-black text-indigo-600 truncate max-w-[150px] mx-auto" :title="getSucursalNombre(datosOrden.Muelle_Destino)">{{ getSucursalNombre(datosOrden.Muelle_Destino) }}</p>
                                         <p class="text-[10px] text-slate-400 font-bold mt-1 uppercase">Destino de Recepción</p>
                                     </div>
                                 </div>
@@ -813,10 +813,10 @@ const getSucursalNombre = (codigo) => {
                                         <p class="text-[10px] text-slate-400 font-bold uppercase mb-2">Equipos operativos</p>
                                         <div class="flex items-center gap-2">
                                             <button @click="operariosSeleccionados = Math.max(1, operariosSeleccionados - 1); recalcularTiempo()"
-                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-red-600 transition-colors font-bold">−</button>
+                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-indigo-600 transition-colors font-bold">−</button>
                                             <span class="text-2xl font-black w-8 text-center" title="1 Equipo = 1 Receptor + 1 Carga">{{ operariosSeleccionados }}</span>
                                             <button @click="operariosSeleccionados++; recalcularTiempo()"
-                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-red-600 transition-colors font-bold">+</button>
+                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-indigo-600 transition-colors font-bold">+</button>
                                         </div>
                                     </div>
                                     <div class="h-10 w-[1px] bg-slate-600"></div>
@@ -830,7 +830,7 @@ const getSucursalNombre = (codigo) => {
 
                         <div class="bg-slate-50 border-t border-slate-100 px-8 py-4 flex justify-between items-center">
                             <p class="text-[10px] text-slate-400 font-bold uppercase italic">Los cálculos están basados en una capacidad de 96 cajas por ciclo.</p>
-                            <button @click="imprimirTicket" class="text-red-600 font-bold text-xs hover:underline uppercase tracking-widest">Imprimir Ticket de Recepción</button>
+                            <button @click="imprimirTicket" class="text-indigo-600 font-bold text-xs hover:underline uppercase tracking-widest">Imprimir Ticket de Recepción</button>
                         </div>
                     </div>
                 </div>
@@ -844,7 +844,7 @@ const getSucursalNombre = (codigo) => {
                 <div class="bg-slate-900 px-8 py-6 flex items-center justify-between">
                     <div>
                         <h3 class="text-lg font-black text-white tracking-tight">Detalle de Productos</h3>
-                        <p class="text-slate-400 text-sm font-medium mt-0.5">Orden <span class="text-red-500 font-bold font-mono">{{ datosOrden?.Numero_OC }}</span> — {{ productosOrden.length }} Producto{{ productosOrden.length !== 1 ? 's' : '' }}</p>
+                        <p class="text-slate-400 text-sm font-medium mt-0.5">Orden <span class="text-indigo-500 font-bold font-mono">{{ datosOrden?.Numero_OC }}</span> — {{ productosOrden.length }} Producto{{ productosOrden.length !== 1 ? 's' : '' }}</p>
                     </div>
                     <button @click="cerrarModalSKU" class="text-slate-400 hover:text-white hover:bg-slate-700 p-2 rounded-xl transition-all">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -854,7 +854,7 @@ const getSucursalNombre = (codigo) => {
                     <div class="relative">
                         <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></span>
                         <input v-model="busquedaProducto" type="text" placeholder="Buscar por código o nombre..."
-                            class="block w-full pl-10 pr-4 py-2.5 text-sm border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-xl transition-all">
+                            class="block w-full pl-10 pr-4 py-2.5 text-sm border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-xl transition-all">
                     </div>
                 </div>
                 <div class="max-h-[400px] overflow-y-auto">
@@ -869,9 +869,9 @@ const getSucursalNombre = (codigo) => {
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                            <tr v-for="(producto, index) in productosFiltrados" :key="index" class="hover:bg-red-50/40 transition-colors group">
+                            <tr v-for="(producto, index) in productosFiltrados" :key="index" class="hover:bg-indigo-50/40 transition-colors group">
                                 <td class="px-8 py-3.5"><span class="text-xs font-bold text-slate-300">{{ index + 1 }}</span></td>
-                                <td class="px-4 py-3.5"><span class="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded group-hover:bg-red-100 group-hover:text-red-700 transition-colors">{{ producto.codigo }}</span></td>
+                                <td class="px-4 py-3.5"><span class="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded group-hover:bg-indigo-100 group-hover:text-indigo-700 transition-colors">{{ producto.codigo }}</span></td>
                                 <td class="px-4 py-3.5"><p class="text-sm text-slate-700 font-semibold leading-tight">{{ producto.producto || 'Sin descripción' }}</p></td>
                                 <td class="px-4 py-3.5 text-center">
                                     <div v-if="producto.c_departamento === '14'">
@@ -931,9 +931,9 @@ const getSucursalNombre = (codigo) => {
                     <div class="flex items-center gap-6">
                         <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Total Productos:</span><span class="text-sm font-black text-slate-800">{{ productosOrden.length }}</span></div>
                         <div class="h-4 w-[1px] bg-slate-300"></div>
-                        <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Total Bultos:</span><span class="text-sm font-black text-red-600">{{ totalBultos }}</span></div>
+                        <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Total Bultos:</span><span class="text-sm font-black text-indigo-600">{{ totalBultos }}</span></div>
                     </div>
-                    <button @click="cerrarModalSKU" class="px-5 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-600 transition-all duration-300 active:scale-95">Cerrar</button>
+                    <button @click="cerrarModalSKU" class="px-5 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-indigo-600 transition-all duration-300 active:scale-95">Cerrar</button>
                 </div>
             </div>
         </Modal>
@@ -941,7 +941,7 @@ const getSucursalNombre = (codigo) => {
         <Modal :show="mostrarModalReprogramar" @close="mostrarModalReprogramar = false">
             <div class="p-6">
                 <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                    <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     Reprogramar Cita
                 </h3>
                 
@@ -953,12 +953,12 @@ const getSucursalNombre = (codigo) => {
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-slate-700 mb-1">Nueva Fecha y Hora</label>
-                        <input v-model="formReprogramar.fecha_cita" type="datetime-local" class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500">
+                        <input v-model="formReprogramar.fecha_cita" type="datetime-local" class="w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500">
                     </div>
                     
                     <div>
                         <label class="block text-sm font-medium text-slate-700 mb-1">Sucursal Asignada</label>
-                        <select v-model="formReprogramar.muelle_asignado" class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500">
+                        <select v-model="formReprogramar.muelle_asignado" class="w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500">
                             <option value="0101">0101 (Hiper)</option>
                             <option value="0102">0102 (Dep Gral)</option>
                             <option value="0111">0111 (Producción)</option>
@@ -973,10 +973,10 @@ const getSucursalNombre = (codigo) => {
 
                     <div>
                         <label class="block text-sm font-medium text-slate-700 mb-1">Motivo de Reprogramación (Obligatorio)</label>
-                        <textarea v-model="formReprogramar.motivo" rows="3" placeholder="Explique brevemente el motivo de este cambio..." class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500"></textarea>
+                        <textarea v-model="formReprogramar.motivo" rows="3" placeholder="Explique brevemente el motivo de este cambio..." class="w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500"></textarea>
                     </div>
                     
-                    <p v-if="errorReprogramacion" class="text-red-500 text-sm font-medium">{{ errorReprogramacion }}</p>
+                    <p v-if="errorReprogramacion" class="text-indigo-500 text-sm font-medium">{{ errorReprogramacion }}</p>
                 </div>
 
                 <div class="mt-6 flex justify-end gap-3">
@@ -984,7 +984,7 @@ const getSucursalNombre = (codigo) => {
                         Cancelar
                     </button>
                     <button @click="guardarReprogramacion" :disabled="procesandoReprogramacion"
-                        class="bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                        class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50">
                         {{ procesandoReprogramacion ? 'Guardando...' : 'Guardar Cambios' }}
                     </button>
                 </div>
@@ -994,9 +994,9 @@ const getSucursalNombre = (codigo) => {
         <!-- Modal Cancelar Cita -->
         <Modal :show="mostrarModalCancelar" @close="mostrarModalCancelar = false" max-width="md">
             <div class="bg-white rounded-2xl overflow-hidden">
-                <div class="bg-red-600 px-6 py-4 flex items-center justify-between">
+                <div class="bg-indigo-600 px-6 py-4 flex items-center justify-between">
                     <h3 class="text-lg font-black text-white">Cancelar Cita</h3>
-                    <button @click="mostrarModalCancelar = false" class="text-red-200 hover:text-white transition-colors">
+                    <button @click="mostrarModalCancelar = false" class="text-indigo-200 hover:text-white transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
@@ -1005,16 +1005,16 @@ const getSucursalNombre = (codigo) => {
                     
                     <label class="block text-sm font-bold text-slate-700 mb-2">Motivo de Cancelación (Obligatorio)</label>
                     <textarea v-model="motivoCancelacion" rows="3" placeholder="Explique brevemente el motivo de la cancelación..." 
-                        class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500 text-sm"></textarea>
+                        class="w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-sm"></textarea>
                     
-                    <p v-if="errorCancelacion" class="text-red-500 text-xs font-bold mt-2">{{ errorCancelacion }}</p>
+                    <p v-if="errorCancelacion" class="text-indigo-500 text-xs font-bold mt-2">{{ errorCancelacion }}</p>
                     
                     <div class="mt-6 flex justify-end gap-3">
                         <button @click="mostrarModalCancelar = false" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
                             Volver
                         </button>
                         <button @click="guardarCancelacion" :disabled="procesandoCancelacion || motivoCancelacion.length < 5"
-                            class="bg-red-600 text-white px-4 py-2 text-sm font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50">
+                            class="bg-indigo-600 text-white px-4 py-2 text-sm font-bold rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50">
                             {{ procesandoCancelacion ? 'Cancelando...' : 'Confirmar Cancelación' }}
                         </button>
                     </div>
@@ -1039,7 +1039,7 @@ const getSucursalNombre = (codigo) => {
                         Esta acción registrará la orden como descargada y validada en el sistema, finalizando la cita correspondiente.
                     </p>
                     
-                    <p v-if="errorFinalizar" class="text-red-500 text-xs font-bold mt-2">⚠️ {{ errorFinalizar }}</p>
+                    <p v-if="errorFinalizar" class="text-indigo-500 text-xs font-bold mt-2">⚠️ {{ errorFinalizar }}</p>
                     
                     <div class="mt-6 flex justify-end gap-3">
                         <button @click="mostrarModalFinalizar = false" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
@@ -1074,7 +1074,7 @@ const getSucursalNombre = (codigo) => {
                     <textarea v-model="motivoReprogramacion" rows="3" placeholder="Explique brevemente el motivo..." 
                         class="w-full rounded-xl border-slate-300 focus:border-orange-500 focus:ring-orange-500 text-sm"></textarea>
                     
-                    <p v-if="errorReprogramacion" class="text-red-500 text-xs font-bold mt-2">{{ errorReprogramacion }}</p>
+                    <p v-if="errorReprogramacion" class="text-indigo-500 text-xs font-bold mt-2">{{ errorReprogramacion }}</p>
                     
                     <div class="mt-6 flex justify-end gap-3">
                         <button @click="mostrarModalReprogramarProveedor = false" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">

@@ -23,7 +23,7 @@ const submit = () => {
 <template>
     <Head title="Recuperar Contraseña - Portal Logístico" />
 
-    <div class="bg-red-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
+    <div class="bg-indigo-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
         <div class="flex-1 text-left">
             <span>📞 0424-7170326</span>
         </div>
@@ -47,7 +47,7 @@ const submit = () => {
                     <img src="/images/logo.png" alt="Logo Empresa Base" class="w-12 h-12 object-contain" />
                     <div class="text-left pr-4">
                        <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">Empresa Base</h2>
-                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-red-600">Logística</p>
+                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-indigo-600">Logística</p>
                     </div>
                 </div>
                 <h2 class="text-3xl font-bold text-white mt-6 tracking-tight drop-shadow-md">
@@ -72,7 +72,7 @@ const submit = () => {
                         <TextInput
                             id="username"
                             type="text"
-                            class="mt-2 block w-full border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
+                            class="mt-2 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
                             v-model="form.username"
                             required
                             autofocus
@@ -85,14 +85,14 @@ const submit = () => {
 
                     <div class="mt-8 flex flex-col gap-4 items-center">
                         <PrimaryButton 
-                            class="w-full justify-center text-lg py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-2xl shadow-lg shadow-red-600/30 transition-all duration-300 hover:shadow-red-600/50 hover:-translate-y-0.5"
+                            class="w-full justify-center text-lg py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-2xl shadow-lg shadow-indigo-600/30 transition-all duration-300 hover:shadow-indigo-600/50 hover:-translate-y-0.5"
                             :class="{ 'opacity-25': form.processing }"
                             :disabled="form.processing"
                         >
                             ENVIAR ENLACE
                         </PrimaryButton>
 
-                        <Link :href="route('login')" class="text-sm text-slate-600 hover:text-red-600 font-medium transition-colors">
+                        <Link :href="route('login')" class="text-sm text-slate-600 hover:text-indigo-600 font-medium transition-colors">
                             Volver al inicio de sesión
                         </Link>
                     </div>
@@ -101,7 +101,7 @@ const submit = () => {
         </div>
 
         <!-- Corporate Footer -->
-        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-red-600 z-10">
+        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-indigo-600 z-10">
             <div class="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div>
                     <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">

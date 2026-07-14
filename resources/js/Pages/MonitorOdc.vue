@@ -337,7 +337,7 @@ onMounted(cargarOrdenes);
                     Consultando VAD10...
                 </div>
 
-                <div v-else-if="errorMensaje" class="bg-red-50 text-red-600 p-6 rounded-2xl border border-red-100 font-bold text-center">
+                <div v-else-if="errorMensaje" class="bg-indigo-50 text-indigo-600 p-6 rounded-2xl border border-indigo-100 font-bold text-center">
                     ⚠️ {{ errorMensaje }}
                 </div>
 
@@ -381,13 +381,13 @@ onMounted(cargarOrdenes);
                                     <template v-for="odc in grupo.ordenes" :key="odc.numero_oc">
                                         <tr @click="toggleFila(odc.numero_oc)"
                                             class="hover:bg-blue-50/30 transition-colors group cursor-pointer"
-                                            :class="{'bg-red-50/50': Number(odc.es_fruver) === 1, 'bg-slate-50': filasExpandidas.includes(odc.numero_oc)}">
+                                            :class="{'bg-indigo-50/50': Number(odc.es_fruver) === 1, 'bg-slate-50': filasExpandidas.includes(odc.numero_oc)}">
                                         
                                         <td class="px-8 py-4">
                                             <div class="flex items-center gap-2">
                                                 <span class="font-black text-slate-800 font-mono text-base">{{ odc.numero_oc }}</span>
                                                 <!-- Alerta Depto 14 (Fase 3) -->
-                                                <span v-if="Number(odc.es_fruver) === 1" class="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse" title="Contiene productos del Departamento 14">
+                                                <span v-if="Number(odc.es_fruver) === 1" class="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse" title="Contiene productos del Departamento 14">
                                                     DEPTO 14
                                                 </span>
                                             </div>

@@ -498,7 +498,7 @@ const formatHora = (f) => {
 };
 
 const statusColor = (s) => {
-    const m = { programada: 'bg-amber-100 text-amber-700', 'en muelle': 'bg-blue-100 text-blue-700', finalizada: 'bg-emerald-100 text-emerald-700', cancelada: 'bg-red-100 text-red-700' };
+    const m = { programada: 'bg-amber-100 text-amber-700', 'en muelle': 'bg-blue-100 text-blue-700', finalizada: 'bg-emerald-100 text-emerald-700', cancelada: 'bg-indigo-100 text-indigo-700' };
     return m[s] || 'bg-slate-100 text-slate-600';
 };
 
@@ -752,7 +752,7 @@ onMounted(cargarCitas);
         <template #header>
             <div class="flex items-center justify-between">
                 <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                    Reservar Cita <span class="text-red-600">| Programar Recepción</span>
+                    Reservar Cita <span class="text-indigo-600">| Programar Recepción</span>
                 </h2>
                 <div class="flex items-center gap-2 text-sm text-slate-500 bg-slate-100 px-4 py-1 rounded-full border border-slate-200">
                     <span class="w-2 h-2 bg-emerald-500 rounded-full"></span>
@@ -768,11 +768,11 @@ onMounted(cargarCitas);
                 <div class="flex items-center justify-center gap-4 mb-8">
                     <div v-for="p in 3" :key="p" class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black transition-all"
-                            :class="paso >= p ? 'bg-red-600 text-white' : 'bg-slate-200 text-slate-400'">{{ p }}</div>
+                            :class="paso >= p ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-400'">{{ p }}</div>
                         <span class="text-sm font-bold hidden sm:inline" :class="paso >= p ? 'text-slate-800' : 'text-slate-400'">
                             {{ p === 1 ? 'Buscar Orden' : p === 2 ? 'Seleccionar Horario' : 'Confirmación' }}
                         </span>
-                        <div v-if="p < 3" class="w-8 h-[2px]" :class="paso > p ? 'bg-red-600' : 'bg-slate-200'"></div>
+                        <div v-if="p < 3" class="w-8 h-[2px]" :class="paso > p ? 'bg-indigo-600' : 'bg-slate-200'"></div>
                     </div>
                 </div>
 
@@ -780,8 +780,8 @@ onMounted(cargarCitas);
                 <div v-if="paso === 1" class="max-w-xl mx-auto">
                     <div class="bg-white overflow-hidden shadow-xl shadow-slate-200/50 sm:rounded-3xl p-8 border border-slate-100">
                         <div class="text-center mb-6">
-                            <div class="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            <div class="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                <svg class="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                             </div>
                             <h3 class="text-xl font-black text-slate-800">Programar Recepción de Mercancía</h3>
                             <p class="text-slate-500 text-sm mt-1">Ingrese el número de Orden de Compra para reservar una cita</p>
@@ -793,14 +793,14 @@ onMounted(cargarCitas);
                                     <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                 </span>
                                 <input v-model="numeroOrden" @keyup.enter="buscarOrden" type="text" placeholder="Ej: E00001167"
-                                    class="block w-full pl-11 pr-4 py-3.5 border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-2xl transition-all shadow-sm text-lg font-mono">
+                                    class="block w-full pl-11 pr-4 py-3.5 border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-2xl transition-all shadow-sm text-lg font-mono">
                             </div>
                             <button @click="buscarOrden" :disabled="cargando"
-                                class="bg-red-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95 disabled:opacity-50 w-full sm:w-auto">
+                                class="bg-indigo-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 disabled:opacity-50 w-full sm:w-auto">
                                 {{ cargando ? 'Buscando...' : 'BUSCAR' }}
                             </button>
                         </div>
-                        <p v-if="error" class="text-red-500 font-medium mt-3 text-sm">⚠️ {{ error }}</p>
+                        <p v-if="error" class="text-indigo-500 font-medium mt-3 text-sm">⚠️ {{ error }}</p>
                     </div>
 
                     <!-- Citas programadas -->
@@ -848,7 +848,7 @@ onMounted(cargarCitas);
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                                         </button>
                                         <button @click="abrirModalCancelar(cita)"
-                                            class="text-slate-400 hover:text-red-600 transition-colors p-1" title="Cancelar cita">
+                                            class="text-slate-400 hover:text-indigo-600 transition-colors p-1" title="Cancelar cita">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                         </button>
                                     </div>
@@ -871,22 +871,22 @@ onMounted(cargarCitas);
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div>
                                 <label class="block text-sm font-bold text-slate-700">Nombre del Asesor o Vendedor Comercial</label>
-                                <input v-model="formHabilitar.asesor" type="text" placeholder="Ej: Juan Pérez" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-red-500 focus:ring-red-500">
+                                <input v-model="formHabilitar.asesor" type="text" placeholder="Ej: Juan Pérez" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                             </div>
                             <div>
                                 <label class="block text-sm font-bold text-slate-700">Correo Electrónico</label>
-                                <input v-model="formHabilitar.email" type="email" placeholder="Para enviar la notificación" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-red-500 focus:ring-red-500">
+                                <input v-model="formHabilitar.email" type="email" placeholder="Para enviar la notificación" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                             </div>
                             <div>
                                 <label class="block text-sm font-bold text-slate-700">Teléfono</label>
-                                <input v-model="formHabilitar.telefono" type="text" placeholder="Ej: 0414-1234567" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-red-500 focus:ring-red-500">
+                                <input v-model="formHabilitar.telefono" type="text" placeholder="Ej: 0414-1234567" class="mt-1 w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                             </div>
                         </div>
 
                         <div class="mt-8 flex flex-col-reverse sm:flex-row justify-center gap-3">
                             <button @click="nuevaReserva" class="px-6 py-3 font-bold text-slate-500 hover:text-slate-800 transition-colors">CANCELAR</button>
                             <button @click="habilitarOdc" :disabled="habilitando"
-                                class="bg-red-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg active:scale-95 disabled:opacity-50">
+                                class="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg active:scale-95 disabled:opacity-50">
                                 {{ habilitando ? 'HABILITANDO...' : 'HABILITAR ORDEN PARA EL PROVEEDOR' }}
                             </button>
                         </div>
@@ -910,7 +910,7 @@ onMounted(cargarCitas);
                                 
                                 <div class="flex flex-col min-w-0">
                                     <p class="text-[10px] text-slate-400 font-black uppercase">Orden de Compra</p>
-                                    <p class="text-lg md:text-xl font-black font-mono text-red-500 truncate">{{ numeroOrden }}</p>
+                                    <p class="text-lg md:text-xl font-black font-mono text-indigo-500 truncate">{{ numeroOrden }}</p>
                                 </div>
                                 
                                 <div class="hidden md:block h-8 w-[1px] bg-slate-700 mx-2 lg:mx-4"></div>
@@ -957,10 +957,10 @@ onMounted(cargarCitas);
                                 <button v-for="f in fechasDisponibles" :key="f.fecha"
                                     @click="fechaSeleccionada = f.fecha"
                                     class="w-full text-left px-4 py-3 rounded-xl transition-all flex items-center justify-between"
-                                    :class="fechaSeleccionada === f.fecha ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'hover:bg-slate-50 text-slate-700'">
+                                    :class="fechaSeleccionada === f.fecha ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'hover:bg-slate-50 text-slate-700'">
                                     <div>
                                         <p class="font-bold text-sm capitalize">{{ f.dia_largo }}</p>
-                                        <span v-if="f.es_hoy" class="text-[10px] font-bold" :class="fechaSeleccionada === f.fecha ? 'text-red-200' : 'text-red-500'">HOY</span>
+                                        <span v-if="f.es_hoy" class="text-[10px] font-bold" :class="fechaSeleccionada === f.fecha ? 'text-indigo-200' : 'text-indigo-500'">HOY</span>
                                     </div>
                                     <svg v-if="fechaSeleccionada === f.fecha" class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
                                 </button>
@@ -982,11 +982,11 @@ onMounted(cargarCitas);
                                     :disabled="!slot.disponible"
                                     class="px-2 py-3 rounded-2xl text-center transition-all border-2 flex flex-col items-center justify-center gap-0.5"
                                     :class="slotSeleccionado?.hora === slot.hora
-                                        ? 'border-red-600 bg-red-50 shadow-md ring-4 ring-red-600/10'
+                                        ? 'border-indigo-600 bg-indigo-50 shadow-md ring-4 ring-indigo-600/10'
                                         : slot.disponible
-                                            ? 'border-slate-100 hover:border-red-200 hover:bg-slate-50'
+                                            ? 'border-slate-100 hover:border-indigo-200 hover:bg-slate-50'
                                             : 'border-transparent bg-slate-50 opacity-40 cursor-not-allowed'">
-                                    <p class="font-black text-sm" :class="slotSeleccionado?.hora === slot.hora ? 'text-red-700' : 'text-slate-800'">{{ slot.hora_formato }}</p>
+                                    <p class="font-black text-sm" :class="slotSeleccionado?.hora === slot.hora ? 'text-indigo-700' : 'text-slate-800'">{{ slot.hora_formato }}</p>
                                     <div class="flex items-center gap-1">
                                         <div v-if="slot.disponible" class="flex gap-0.5">
                                             <span v-for="n in slot.muelles_libres" :key="n" class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
@@ -1007,7 +1007,7 @@ onMounted(cargarCitas);
                                             <button v-for="m in slotSeleccionado.muelles" :key="m"
                                                 @click="muelleSeleccionado = m"
                                                 class="px-4 py-2 rounded-xl border-2 font-bold text-xs transition-all shadow-sm"
-                                                :class="muelleSeleccionado === m ? 'border-red-600 bg-red-600 text-white shadow-red-200' : 'border-slate-200 text-slate-500 hover:border-slate-300 bg-white'"
+                                                :class="muelleSeleccionado === m ? 'border-indigo-600 bg-indigo-600 text-white shadow-indigo-200' : 'border-slate-200 text-slate-500 hover:border-slate-300 bg-white'"
                                                 :title="getSucursalNombre(m)">
                                                 {{ getSucursalNombre(m) }}
                                             </button>
@@ -1023,11 +1023,11 @@ onMounted(cargarCitas);
                                 <div>
                                     <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Observaciones (opcional)</label>
                                     <textarea v-model="observaciones" rows="2" placeholder="Notas adicionales para la recepción..."
-                                        class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20 text-sm"></textarea>
+                                        class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20 text-sm"></textarea>
                                 </div>
-                                <p v-if="error" class="text-red-500 font-medium text-sm">⚠️ {{ error }}</p>
+                                <p v-if="error" class="text-indigo-500 font-medium text-sm">⚠️ {{ error }}</p>
                                 <button @click="reservar" :disabled="cargando || !muelleSeleccionado"
-                                    class="w-full bg-red-600 text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95 disabled:opacity-50">
+                                    class="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold text-sm uppercase tracking-wider hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 disabled:opacity-50">
                                     {{ cargando ? 'Reservando...' : 'CONFIRMAR RESERVACIÓN' }}
                                 </button>
                             </div>
@@ -1067,11 +1067,11 @@ onMounted(cargarCitas);
                         </div>
                         <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <div v-for="odc in odcsPendientes" :key="odc.numero_oc" 
-                                class="border border-slate-200 rounded-xl p-5 hover:border-red-500 transition-colors cursor-pointer bg-slate-50 shadow-sm"
+                                class="border border-slate-200 rounded-xl p-5 hover:border-indigo-500 transition-colors cursor-pointer bg-slate-50 shadow-sm"
                                 @click="abrirModalProveedor(odc)">
                                 <div class="flex justify-between items-start mb-2">
                                     <span class="font-bold text-lg text-slate-800">{{ odc.numero_oc }}</span>
-                                    <span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded">Habilitada</span>
+                                    <span class="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded">Habilitada</span>
                                 </div>
                                 <p class="text-sm text-slate-600 mb-4">Click para agendar despacho</p>
                                 <div class="flex flex-col gap-1 text-xs text-slate-500">
@@ -1102,7 +1102,7 @@ onMounted(cargarCitas);
                         
                         <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                             <h3 class="text-xl font-black text-slate-800">Seleccione Horario de Recepción</h3>
-                            <button @click="nuevaReserva" class="text-xs font-bold text-slate-500 hover:text-red-600 transition-colors flex items-center gap-1.5 py-1 px-2.5 rounded-lg hover:bg-slate-50 border border-slate-250">
+                            <button @click="nuevaReserva" class="text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors flex items-center gap-1.5 py-1 px-2.5 rounded-lg hover:bg-slate-50 border border-slate-250">
                                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                                 Volver Atrás
                             </button>
@@ -1112,7 +1112,7 @@ onMounted(cargarCitas);
                         <div class="flex gap-2 overflow-x-auto pb-4 mb-6 scrollbar-hide">
                             <button v-for="fd in fechasDisponibles" :key="fd.fecha" @click="fechaSeleccionada = fd.fecha"
                                 class="flex flex-col items-center justify-center min-w-[80px] p-3 rounded-2xl transition-all border"
-                                :class="fechaSeleccionada === fd.fecha ? 'bg-red-600 text-white border-red-600 shadow-md shadow-red-600/30' : 'bg-white text-slate-600 border-slate-200 hover:border-red-300 hover:bg-red-50'">
+                                :class="fechaSeleccionada === fd.fecha ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/30' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'">
                                 <span class="text-xs font-bold uppercase opacity-80">{{ new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { weekday: 'short' }) }}</span>
                                 <span class="text-2xl font-black">{{ new Date(fd.fecha + 'T00:00:00').getDate() }}</span>
                                 <span class="text-[10px] font-bold uppercase opacity-80">{{ new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { month: 'short' }) }}</span>
@@ -1126,7 +1126,7 @@ onMounted(cargarCitas);
                                 class="py-3 px-2 rounded-xl text-center font-bold text-sm transition-all border border-transparent flex flex-col items-center justify-center gap-1 relative overflow-hidden"
                                 :class="[
                                     !slot.disponible ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-60' : 
-                                    slotSeleccionado?.hora === slot.hora ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105 z-10' : 'bg-red-50 text-red-900 hover:bg-red-100 cursor-pointer hover:-translate-y-0.5'
+                                    slotSeleccionado?.hora === slot.hora ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-105 z-10' : 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100 cursor-pointer hover:-translate-y-0.5'
                                 ]">
                                 {{ formatHora(`2000-01-01 ${slot.hora}:00`) }}
                             </button>
@@ -1137,7 +1137,7 @@ onMounted(cargarCitas);
                                 ← Volver a Mis Órdenes
                             </button>
                             <button v-if="slotSeleccionado" @click="reservarComoProveedor" :disabled="cargando"
-                                class="bg-red-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg active:scale-95">
+                                class="bg-indigo-600 text-white px-8 py-3.5 rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg active:scale-95">
                                 <span v-if="isReprogramar">{{ cargando ? 'REPROGRAMANDO...' : 'CONFIRMAR NUEVO HORARIO' }}</span>
                                 <span v-else>{{ cargando ? 'AGENDANDO...' : 'CONFIRMAR CITA' }}</span>
                             </button>
@@ -1153,12 +1153,12 @@ onMounted(cargarCitas);
                                 <div class="md:col-span-2 border border-slate-200 rounded-xl p-4 bg-slate-50">
                                     <div class="flex items-center justify-between mb-2">
                                         <label class="block text-sm font-bold text-slate-700">Correo del Asesor/Vendedor (Notificaciones)</label>
-                                        <label class="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-600 hover:text-red-600 select-none bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors" :class="editarCorreo ? 'border-red-300 bg-red-50 text-red-700' : ''">
-                                            <input type="checkbox" v-model="editarCorreo" class="rounded border-slate-300 text-red-600 focus:ring-red-600 cursor-pointer">
+                                        <label class="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-600 hover:text-indigo-600 select-none bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors" :class="editarCorreo ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : ''">
+                                            <input type="checkbox" v-model="editarCorreo" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer">
                                             Editar Correo
                                         </label>
                                     </div>
-                                    <input v-model="formProveedor.email_contacto" type="email" :readonly="!editarCorreo" :class="editarCorreo ? 'bg-white border-slate-300 focus:border-red-500 focus:ring-red-500 text-slate-900' : 'bg-slate-200 border-slate-200 text-slate-500 cursor-not-allowed'" class="mt-1 block w-full rounded-md transition-colors" placeholder="Ej: ventas@proveedor.com">
+                                    <input v-model="formProveedor.email_contacto" type="email" :readonly="!editarCorreo" :class="editarCorreo ? 'bg-white border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 text-slate-900' : 'bg-slate-200 border-slate-200 text-slate-500 cursor-not-allowed'" class="mt-1 block w-full rounded-md transition-colors" placeholder="Ej: ventas@proveedor.com">
                                     <p class="text-xs text-slate-500 mt-2">Active la casilla "Editar Correo" si su vendedor o asesor comercial cambió y desea actualizar la dirección donde recibirá las notificaciones.</p>
                                 </div>
                                 <div>
@@ -1205,7 +1205,7 @@ onMounted(cargarCitas);
                                         <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                         ✅ Vehículo con Thermo King / Cadena de frío — Apto para perecederos
                                     </p>
-                                    <p v-if="!vehiculoRequiereFrio && esMercanciaPerecedera" class="mt-2 text-xs text-red-700 font-bold bg-red-50 border border-red-200 rounded-lg px-3 py-2 flex items-center gap-2">
+                                    <p v-if="!vehiculoRequiereFrio && esMercanciaPerecedera" class="mt-2 text-xs text-indigo-700 font-bold bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 flex items-center gap-2">
                                         <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                                         ⚠️ Alerta: Para mercancía perecedera se requiere vehículo con unidad de refrigeración (Thermo King). Seleccione "Camión 350 / Cava Pequeña" u otro con cadena de frío.
                                     </p>
@@ -1229,17 +1229,17 @@ onMounted(cargarCitas);
                                 </div>
                                 <div>
                                     <label class="block text-sm font-bold text-slate-700">Archivo de Factura (PDF/Imagen)</label>
-                                    <input type="file" @change="handleFacturaUpload" accept=".pdf,image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
+                                    <input type="file" @change="handleFacturaUpload" accept=".pdf,image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
                                 </div>
                             </div>
                             <div class="mt-6 bg-slate-100 p-4 rounded-lg">
                                 <p class="text-sm text-slate-600 font-bold text-center">
-                                    Duración de descarga estimada: <span class="text-red-600 text-lg">{{ formatMinutos(duracionCalculada) }}</span>
+                                    Duración de descarga estimada: <span class="text-indigo-600 text-lg">{{ formatMinutos(duracionCalculada) }}</span>
                                 </p>
                             </div>
                             <div class="mt-6 flex flex-col-reverse sm:flex-row justify-end gap-3">
                                 <button @click="modalInteligente = false" class="px-4 py-3 sm:py-2 bg-slate-200 rounded font-bold w-full sm:w-auto text-slate-700">Cancelar</button>
-                                <button @click="continuarAHorarios" class="px-4 py-3 sm:py-2 bg-red-600 text-white rounded font-bold w-full sm:w-auto">Seleccionar Fecha y Hora</button>
+                                <button @click="continuarAHorarios" class="px-4 py-3 sm:py-2 bg-indigo-600 text-white rounded font-bold w-full sm:w-auto">Seleccionar Fecha y Hora</button>
                             </div>
                         </div>
                     </Modal>
@@ -1250,7 +1250,7 @@ onMounted(cargarCitas);
         <div v-if="modalCancelar" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
             <div class="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-100">
                 <div class="p-6">
-                    <div class="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4">
+                    <div class="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                     </div>
                     <h3 class="text-xl font-black text-slate-800">Cancelar Cita</h3>
@@ -1259,10 +1259,10 @@ onMounted(cargarCitas);
                     <div class="mt-4">
                         <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Motivo de Cancelación</label>
                         <textarea v-model="motivoCancelacion" rows="3" placeholder="Ej: Error del proveedor, falta de inventario..."
-                            class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20 text-sm"></textarea>
+                            class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20 text-sm"></textarea>
                     </div>
                     
-                    <p v-if="errorModal" class="text-red-500 font-medium mt-2 text-sm">⚠️ {{ errorModal }}</p>
+                    <p v-if="errorModal" class="text-indigo-500 font-medium mt-2 text-sm">⚠️ {{ errorModal }}</p>
                 </div>
                 <div class="bg-slate-50 px-6 py-4 flex flex-col-reverse sm:flex-row justify-end gap-3 border-t border-slate-100">
                     <button @click="cerrarModalCancelar" :disabled="procesandoModal"
@@ -1270,7 +1270,7 @@ onMounted(cargarCitas);
                         Volver
                     </button>
                     <button @click="confirmarCancelacion" :disabled="procesandoModal || motivoCancelacion.length < 5"
-                        class="px-5 py-3 sm:py-2.5 rounded-xl font-bold text-sm text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 transition-all disabled:opacity-50 w-full sm:w-auto">
+                        class="px-5 py-3 sm:py-2.5 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50 w-full sm:w-auto">
                         {{ procesandoModal ? 'Cancelando...' : 'Confirmar Cancelación' }}
                     </button>
                 </div>
@@ -1336,7 +1336,7 @@ onMounted(cargarCitas);
                 </div>
                 
                 <div class="bg-white px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center border-t border-slate-100 gap-4 md:gap-0">
-                    <p class="text-red-500 font-medium text-sm w-full"><span v-if="errorModal">⚠️ {{ errorModal }}</span></p>
+                    <p class="text-indigo-500 font-medium text-sm w-full"><span v-if="errorModal">⚠️ {{ errorModal }}</span></p>
                     <div class="flex flex-col-reverse sm:flex-row w-full md:w-auto gap-3">
                         <button @click="cerrarModalReprogramar" :disabled="procesandoModal"
                             class="px-5 py-3 sm:py-2.5 rounded-xl font-bold text-sm text-slate-500 hover:bg-slate-100 transition-colors w-full sm:w-auto">Cancelar</button>
@@ -1353,7 +1353,7 @@ onMounted(cargarCitas);
         <div v-if="showEmailModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md p-4">
             <div class="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-100 transform transition-all duration-300 scale-100">
                 <div class="p-6">
-                    <div class="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mb-4">
+                    <div class="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
                     </div>
                     <h3 class="text-lg font-black text-slate-800 leading-snug">Configurar Correo Electrónico</h3>
@@ -1367,8 +1367,8 @@ onMounted(cargarCitas);
                     <div class="mt-4 border border-slate-200 rounded-xl p-4 bg-slate-50">
                         <div class="flex items-center justify-between mb-2">
                             <label class="block text-sm font-bold text-slate-700">Correo del Proveedor / Vendedor</label>
-                            <label class="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-600 hover:text-red-600 select-none bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors" :class="editarCorreoComprador ? 'border-red-300 bg-red-50 text-red-700' : ''">
-                                <input type="checkbox" v-model="editarCorreoComprador" class="rounded border-slate-300 text-red-600 focus:ring-red-600 cursor-pointer">
+                            <label class="flex items-center gap-2 cursor-pointer text-sm font-bold text-slate-600 hover:text-indigo-600 select-none bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors" :class="editarCorreoComprador ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : ''">
+                                <input type="checkbox" v-model="editarCorreoComprador" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-600 cursor-pointer">
                                 Editar Correo
                             </label>
                         </div>
@@ -1377,11 +1377,11 @@ onMounted(cargarCitas);
                             v-model="modalEmailInput" 
                             :readonly="!editarCorreoComprador"
                             placeholder="ejemplo@proveedor.com"
-                            class="block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20 text-xs px-4 py-3 font-mono transition-colors"
+                            class="block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20 text-xs px-4 py-3 font-mono transition-colors"
                             :class="editarCorreoComprador ? 'bg-white' : 'bg-slate-200 text-slate-500 cursor-not-allowed'"
                             @keyup.enter="guardarYEnviarOdc"
                         />
-                        <p v-if="modalEmailError" class="text-red-500 font-bold mt-2 text-[11px] flex items-center gap-1">
+                        <p v-if="modalEmailError" class="text-indigo-500 font-bold mt-2 text-[11px] flex items-center gap-1">
                             <span>⚠️</span> {{ modalEmailError }}
                         </p>
                     </div>
@@ -1392,7 +1392,7 @@ onMounted(cargarCitas);
                         Cancelar
                     </button>
                     <button @click="guardarYEnviarOdc"
-                        class="px-5 py-3 sm:py-2.5 rounded-xl font-bold text-xs text-white bg-red-600 hover:bg-red-700 shadow-lg shadow-red-600/20 transition-all w-full sm:w-auto">
+                        class="px-5 py-3 sm:py-2.5 rounded-xl font-bold text-xs text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all w-full sm:w-auto">
                         Guardar y Enviar
                     </button>
                 </div>

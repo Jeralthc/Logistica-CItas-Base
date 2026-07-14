@@ -231,7 +231,7 @@ const subirYAplicarZip = async () => {
         <template #header>
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                    Centro de Control de Cambios <span class="text-red-600 font-normal">| Despliegue y Recuperación</span>
+                    Centro de Control de Cambios <span class="text-indigo-600 font-normal">| Despliegue y Recuperación</span>
                 </h2>
                 <div class="flex items-center gap-2">
                     <span class="text-xs text-slate-500 font-semibold bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-full flex items-center gap-1.5">
@@ -254,16 +254,16 @@ const subirYAplicarZip = async () => {
                     </div>
                 </div>
                 
-                <div v-if="errorMensaje" class="mb-6 bg-red-50 border border-red-200 text-red-800 p-4 rounded-2xl flex items-start gap-3">
-                    <svg class="w-5 h-5 text-red-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div v-if="errorMensaje" class="mb-6 bg-indigo-50 border border-indigo-200 text-indigo-800 p-4 rounded-2xl flex items-start gap-3">
+                    <svg class="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     <div>
                         <p class="font-bold text-sm">Fallo en Operación</p>
-                        <p class="text-xs mt-0.5 text-red-700">{{ errorMensaje }}</p>
+                        <p class="text-xs mt-0.5 text-indigo-700">{{ errorMensaje }}</p>
                     </div>
                 </div>
 
                 <div v-if="cargando" class="text-center py-20 text-slate-500">
-                    <div class="animate-spin w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+                    <div class="animate-spin w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4"></div>
                     Cargando información del servidor y diagnóstico...
                 </div>
 
@@ -274,7 +274,7 @@ const subirYAplicarZip = async () => {
                         <!-- Panel de Diagnóstico -->
                         <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 lg:col-span-2">
                             <h3 class="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
-                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                                 Diagnóstico de Entorno
                             </h3>
                             
@@ -304,7 +304,7 @@ const subirYAplicarZip = async () => {
 
                                 <div class="space-y-4 bg-slate-50 p-5 rounded-2xl border border-slate-100">
                                     <h4 class="text-sm font-bold text-slate-700 flex items-center gap-1.5">
-                                        <span class="w-2 h-2 rounded-full" :class="info.db.connected ? 'bg-green-500' : 'bg-red-500'"></span>
+                                        <span class="w-2 h-2 rounded-full" :class="info.db.connected ? 'bg-green-500' : 'bg-indigo-500'"></span>
                                         Conexión a Base de Datos
                                     </h4>
                                     <div v-if="info.db.connected" class="space-y-2 text-xs">
@@ -321,7 +321,7 @@ const subirYAplicarZip = async () => {
                                             <span class="text-slate-800 font-bold font-mono">{{ info.db.host }}</span>
                                         </div>
                                     </div>
-                                    <div v-else class="text-xs text-red-600 font-bold">
+                                    <div v-else class="text-xs text-indigo-600 font-bold">
                                         Desconectado. Error: {{ info.db.error }}
                                     </div>
 
@@ -346,25 +346,25 @@ const subirYAplicarZip = async () => {
                         <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col justify-between">
                             <div>
                                 <h3 class="text-lg font-black text-slate-800 mb-2 flex items-center gap-2">
-                                    <svg class="w-5 h-5 text-red-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                                    <svg class="w-5 h-5 text-indigo-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
                                     Mantenimiento Búnker
                                 </h3>
                                 <p class="text-xs text-slate-500 mb-6">Activa el bloqueo a nivel de núcleo. Evita el acceso a usuarios mientras actualizas la web.</p>
                                 
-                                <div class="p-4 rounded-2xl mb-4 text-center border font-bold" :class="info.maintenance ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'">
+                                <div class="p-4 rounded-2xl mb-4 text-center border font-bold" :class="info.maintenance ? 'bg-indigo-50 border-indigo-200 text-indigo-800' : 'bg-green-50 border-green-200 text-green-800'">
                                     {{ info.maintenance ? '¡El sistema está en mantenimiento!' : 'El sistema está en línea' }}
                                 </div>
 
                                 <div v-if="!info.maintenance" class="mb-4">
                                     <label class="block text-xs font-bold text-slate-700 mb-1">Hora estimada de regreso</label>
-                                    <input type="datetime-local" v-model="maintenanceEndTime" class="w-full text-xs rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500" />
+                                    <input type="datetime-local" v-model="maintenanceEndTime" class="w-full text-xs rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500" />
                                 </div>
                             </div>
 
                             <button 
                                 @click="alternarMantenimiento" 
                                 :disabled="changingMaintenance"
-                                :class="info.maintenance ? 'bg-slate-800 hover:bg-slate-700 shadow-slate-800/10' : 'bg-red-600 hover:bg-red-500 shadow-red-600/20'"
+                                :class="info.maintenance ? 'bg-slate-800 hover:bg-slate-700 shadow-slate-800/10' : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/20'"
                                 class="w-full text-white py-3 rounded-xl font-bold transition-all shadow-lg text-sm"
                             >
                                 <span v-if="changingMaintenance" class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full inline-block mr-2"></span>
@@ -381,7 +381,7 @@ const subirYAplicarZip = async () => {
                         <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 flex flex-col justify-between">
                             <div>
                                 <h3 class="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">
-                                    <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                    <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                                     Acciones de Optimización
                                 </h3>
                                 <p class="text-xs text-slate-500 mb-6">Ejecuta comandos de limpieza en producción sin necesidad de entrar a la consola SSH o cPanel.</p>
@@ -408,10 +408,10 @@ const subirYAplicarZip = async () => {
                                     <button 
                                         @click="ejecutarAccion('/api/despliegue/ejecutar-migracion', 'Ejecución de Migraciones')"
                                         :disabled="cargandoAccion || !info.db.connected"
-                                        class="w-full bg-red-50 hover:bg-red-100 border border-red-100 text-red-800 text-left px-4 py-3 rounded-2xl text-xs font-bold transition-colors flex items-center justify-between"
+                                        class="w-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-800 text-left px-4 py-3 rounded-2xl text-xs font-bold transition-colors flex items-center justify-between"
                                     >
                                         Ejecutar Migraciones Pendientes
-                                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2M7 9a7 7 0 0111.79 3.179M7 9h6"></path></svg>
+                                        <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2M7 9a7 7 0 0111.79 3.179M7 9h6"></path></svg>
                                     </button>
                                 </div>
                             </div>
@@ -431,7 +431,7 @@ const subirYAplicarZip = async () => {
                         <div class="bg-slate-900 p-6 rounded-3xl shadow-xl shadow-slate-950 border border-slate-800 lg:col-span-2 flex flex-col justify-between">
                             <div>
                                 <h3 class="text-sm font-bold text-slate-400 mb-4 font-mono flex items-center gap-2">
-                                    <span class="w-3 h-3 bg-red-500 rounded-full inline-block"></span>
+                                    <span class="w-3 h-3 bg-indigo-500 rounded-full inline-block"></span>
                                     <span class="w-3 h-3 bg-yellow-500 rounded-full inline-block"></span>
                                     <span class="w-3 h-3 bg-green-500 rounded-full inline-block"></span>
                                     terminal_output.log
@@ -456,7 +456,7 @@ const subirYAplicarZip = async () => {
                         <!-- Panel de Subida de ZIP de Parche -->
                         <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 lg:col-span-1">
                             <h3 class="text-lg font-black text-slate-800 mb-2 flex items-center gap-2">
-                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                                 Despliegue de Cambios ZIP
                             </h3>
                             <p class="text-xs text-slate-500 mb-6">Arrastra o selecciona el ZIP generado por tu sistema de cambios local. Se instalará automáticamente.</p>
@@ -466,7 +466,7 @@ const subirYAplicarZip = async () => {
                                 @dragover="onDragOver"
                                 @dragleave="onDragLeave"
                                 @drop="onDrop"
-                                :class="arrastrandoZip ? 'border-red-500 bg-red-50/50' : 'border-slate-200 hover:border-slate-300'"
+                                :class="arrastrandoZip ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-slate-300'"
                                 class="border-2 border-dashed p-8 rounded-2xl text-center cursor-pointer transition-all bg-slate-50/50"
                                 @click="$refs.fileInput.click()"
                             >
@@ -488,7 +488,7 @@ const subirYAplicarZip = async () => {
                                 <button 
                                     @click="subirYAplicarZip"
                                     :disabled="cargandoAccion"
-                                    class="w-full bg-red-600 hover:bg-red-500 text-white font-bold text-xs py-3 rounded-xl mt-4 transition-colors flex items-center justify-center gap-1.5"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-3 rounded-xl mt-4 transition-colors flex items-center justify-center gap-1.5"
                                 >
                                     <span v-if="cargandoAccion" class="animate-spin w-3 h-3 border-2 border-white border-t-transparent rounded-full"></span>
                                     Desplegar Parche Ahora
@@ -499,7 +499,7 @@ const subirYAplicarZip = async () => {
                         <!-- Historial de Backups -->
                         <div class="bg-white p-6 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 lg:col-span-2">
                             <h3 class="text-lg font-black text-slate-800 mb-2 flex items-center gap-2">
-                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                 Historial de Copias de Seguridad (Backups)
                             </h3>
                             <p class="text-xs text-slate-500 mb-6">Listado de copias generadas automáticamente o de forma manual. Puedes restaurar el sistema a cualquier estado anterior.</p>
@@ -510,7 +510,7 @@ const subirYAplicarZip = async () => {
                                     <div class="min-w-0 flex-1">
                                         <div class="flex flex-wrap items-center gap-2 mb-1">
                                             <span class="font-bold text-slate-800 block text-xs break-all">{{ bk.filename }}</span>
-                                            <span v-if="bk.source === 'root'" class="bg-red-50 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">Parche</span>
+                                            <span v-if="bk.source === 'root'" class="bg-indigo-50 text-indigo-600 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">Parche</span>
                                             <span v-else class="bg-slate-100 text-slate-600 text-[9px] font-black px-1.5 py-0.5 rounded uppercase">Respaldo</span>
                                         </div>
                                         <div class="flex items-center gap-3 text-[10px] text-slate-400 font-semibold mt-1">
@@ -528,7 +528,7 @@ const subirYAplicarZip = async () => {
                                         <button 
                                             @click="restaurarBackup(bk.filename)"
                                             :disabled="cargandoAccion"
-                                            class="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-3 py-2 rounded-xl transition-all shadow-md shadow-red-600/15 active:scale-95 disabled:opacity-50"
+                                            class="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold px-3 py-2 rounded-xl transition-all shadow-md shadow-indigo-600/15 active:scale-95 disabled:opacity-50"
                                         >
                                             Restaurar
                                         </button>

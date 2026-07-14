@@ -81,10 +81,10 @@ onMounted(cargarOperarios);
         <template #header>
             <div class="flex items-center justify-between">
                 <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                    Gestión de Operarios <span class="text-red-600">| Personal de Descarga</span>
+                    Gestión de Operarios <span class="text-indigo-600">| Personal de Descarga</span>
                 </h2>
                 <button @click="abrirCrear"
-                    class="bg-red-600 text-white px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95 flex items-center gap-2">
+                    class="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-bold text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                     Nuevo Operario
                 </button>
@@ -146,7 +146,7 @@ onMounted(cargarOperarios);
                                 <button @click="abrirEditar(op)" class="text-slate-400 hover:text-blue-600 transition-colors p-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                 </button>
-                                <button @click="eliminar(op)" class="text-slate-400 hover:text-red-600 transition-colors p-1">
+                                <button @click="eliminar(op)" class="text-slate-400 hover:text-indigo-600 transition-colors p-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                 </button>
                             </div>
@@ -183,7 +183,7 @@ onMounted(cargarOperarios);
                                 <button @click="abrirEditar(op)" class="text-slate-400 hover:text-blue-600 transition-colors p-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                                 </button>
-                                <button @click="eliminar(op)" class="text-slate-400 hover:text-red-600 transition-colors p-1">
+                                <button @click="eliminar(op)" class="text-slate-400 hover:text-indigo-600 transition-colors p-1">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                                 </button>
                             </div>
@@ -203,33 +203,33 @@ onMounted(cargarOperarios);
                 <div class="p-8 space-y-5">
                     <div>
                         <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Nombre Completo</label>
-                        <input v-model="form.nombre" type="text" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20">
+                        <input v-model="form.nombre" type="text" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20">
                     </div>
                     <div>
                         <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Cédula</label>
-                        <input v-model="form.cedula" type="text" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20">
+                        <input v-model="form.cedula" type="text" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20">
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Tipo</label>
-                            <select v-model="form.tipo" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20">
+                            <select v-model="form.tipo" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20">
                                 <option value="receptor">Receptor de Muelle</option>
                                 <option value="carga">Operario de Carga</option>
                             </select>
                         </div>
                         <div>
                             <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Turno</label>
-                            <select v-model="form.turno" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-red-600 focus:ring-red-600/20">
+                            <select v-model="form.turno" class="mt-1 block w-full border-slate-200 rounded-xl focus:border-indigo-600 focus:ring-indigo-600/20">
                                 <option value="diurno">Diurno</option>
                                 <option value="nocturno">Nocturno</option>
                             </select>
                         </div>
                     </div>
-                    <p v-if="error" class="text-red-500 text-sm font-medium">⚠️ {{ error }}</p>
+                    <p v-if="error" class="text-indigo-500 text-sm font-medium">⚠️ {{ error }}</p>
                 </div>
                 <div class="bg-slate-50 border-t border-slate-200 px-8 py-4 flex justify-end gap-3">
                     <button @click="mostrarModal = false" class="px-5 py-2 text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">Cancelar</button>
-                    <button @click="guardar" class="px-6 py-2 bg-red-600 text-white text-sm font-bold rounded-xl hover:bg-red-700 transition-all active:scale-95">
+                    <button @click="guardar" class="px-6 py-2 bg-indigo-600 text-white text-sm font-bold rounded-xl hover:bg-indigo-700 transition-all active:scale-95">
                         {{ editando ? 'Guardar Cambios' : 'Registrar' }}
                     </button>
                 </div>

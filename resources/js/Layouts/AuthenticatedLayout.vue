@@ -70,11 +70,11 @@ const toastTheme = computed(() => {
     if (t === 'cancelada') {
         return {
             title: 'Cita Cancelada',
-            iconBg: 'bg-red-600',
-            iconShadow: 'shadow-red-600/30',
-            textColor: 'text-red-400',
-            btnBg: 'bg-red-600 hover:bg-red-500',
-            progressBg: 'bg-red-600'
+            iconBg: 'bg-indigo-600',
+            iconShadow: 'shadow-indigo-600/30',
+            textColor: 'text-indigo-400',
+            btnBg: 'bg-indigo-600 hover:bg-indigo-500',
+            progressBg: 'bg-indigo-600'
         };
     } else if (t === 'reprogramada') {
         return {
@@ -364,7 +364,7 @@ onUnmounted(() => {
                                     <!-- Badge -->
                                     <span
                                         v-if="totalNoLeidas > 0"
-                                        class="absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] font-black min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1 animate-pulse"
+                                        class="absolute -top-0.5 -right-0.5 bg-indigo-600 text-white text-[10px] font-black min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1 animate-pulse"
                                     >
                                         {{ totalNoLeidas > 99 ? '99+' : totalNoLeidas }}
                                     </span>
@@ -392,7 +392,7 @@ onUnmounted(() => {
                                             <button
                                                 v-if="totalNoLeidas > 0"
                                                 @click="marcarTodasLeidas"
-                                                class="text-xs text-red-400 hover:text-red-300 font-bold transition-colors"
+                                                class="text-xs text-indigo-400 hover:text-indigo-300 font-bold transition-colors"
                                             >
                                                 Leer todas
                                             </button>
@@ -404,15 +404,15 @@ onUnmounted(() => {
                                                 v-for="notif in notificaciones"
                                                 :key="notif.id"
                                                 class="px-5 py-3.5 transition-colors cursor-pointer group"
-                                                :class="notif.leida ? 'hover:bg-slate-50 opacity-70 bg-white' : 'hover:bg-red-50/50 bg-white'"
+                                                :class="notif.leida ? 'hover:bg-slate-50 opacity-70 bg-white' : 'hover:bg-indigo-50/50 bg-white'"
                                                 @click="buscarOrdenDesdeNotif(notif)"
                                             >
                                                 <div class="flex items-start justify-between gap-3">
                                                     <div class="flex-1 min-w-0">
                                                         <div class="flex items-center gap-2 mb-1">
-                                                            <span v-if="!notif.leida" class="w-2 h-2 bg-red-500 rounded-full flex-shrink-0 animate-pulse"></span>
+                                                            <span v-if="!notif.leida" class="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0 animate-pulse"></span>
                                                             <span class="text-sm font-black text-slate-800 font-mono">{{ notif.numero_oc }}</span>
-                                                            <span v-if="!notif.leida && notif.tipo === 'cancelada'" class="text-[10px] font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded">CANCELADA</span>
+                                                            <span v-if="!notif.leida && notif.tipo === 'cancelada'" class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">CANCELADA</span>
                                                             <span v-else-if="!notif.leida && notif.tipo === 'reprogramada'" class="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">REPROGRAMADA</span>
                                                             <span v-else-if="!notif.leida && notif.tipo === 'odc_habilitada'" class="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">ODC HABILITADA</span>
                                                             <span v-else-if="!notif.leida" class="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">NUEVA CITA</span>
@@ -488,7 +488,7 @@ onUnmounted(() => {
                                             @click="showMaintenanceModal = true"
                                             class="block w-full px-4 py-2 text-start text-sm leading-5 text-gray-700 transition duration-150 ease-in-out hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
                                         >
-                                            <span class="flex items-center text-red-600 font-bold">
+                                            <span class="flex items-center text-indigo-600 font-bold">
                                                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                                                 Mantenimiento
                                             </span>
@@ -659,21 +659,21 @@ onUnmounted(() => {
         <div v-if="showMaintenanceModal" class="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showMaintenanceModal = false"></div>
             <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-slide-up">
-                <div class="bg-red-600 px-6 py-4 flex items-center gap-3">
+                <div class="bg-indigo-600 px-6 py-4 flex items-center gap-3">
                     <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
                     <h3 class="text-white font-bold text-lg">Modo de Mantenimiento</h3>
                 </div>
                 <div class="p-6">
                     <p class="text-sm text-slate-600 mb-6">Bloquea el acceso al sistema. Todos los usuarios (excepto el superadmin con bypass) verán la pantalla de mantenimiento.</p>
                     
-                    <div v-if="isMaintenanceActive" class="p-4 bg-red-50 border border-red-100 rounded-xl mb-4 text-center">
-                        <p class="text-red-600 font-bold text-sm mb-1">¡EL SISTEMA ESTÁ EN MANTENIMIENTO!</p>
-                        <p class="text-xs text-red-500 mb-2">Finaliza estimado: {{ maintenanceEndTime.replace('T', ' ') }}</p>
+                    <div v-if="isMaintenanceActive" class="p-4 bg-indigo-50 border border-indigo-100 rounded-xl mb-4 text-center">
+                        <p class="text-indigo-600 font-bold text-sm mb-1">¡EL SISTEMA ESTÁ EN MANTENIMIENTO!</p>
+                        <p class="text-xs text-indigo-500 mb-2">Finaliza estimado: {{ maintenanceEndTime.replace('T', ' ') }}</p>
                     </div>
 
                     <div v-else class="mb-5">
                         <label class="block text-sm font-bold text-slate-700 mb-1">Hora y Fecha Estimada de Regreso</label>
-                        <input type="datetime-local" v-model="maintenanceEndTime" class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500">
+                        <input type="datetime-local" v-model="maintenanceEndTime" class="w-full rounded-xl border-slate-300 focus:border-indigo-500 focus:ring-indigo-500">
                         <p class="text-xs text-slate-400 mt-1">Este tiempo se usará para el contador en la pantalla 503.</p>
                     </div>
 
@@ -681,7 +681,7 @@ onUnmounted(() => {
                         <button @click="showMaintenanceModal = false" class="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700">Cancelar</button>
                         <button 
                             @click="toggleMaintenance" 
-                            :class="isMaintenanceActive ? 'bg-slate-800 hover:bg-slate-700' : 'bg-red-600 hover:bg-red-500'" 
+                            :class="isMaintenanceActive ? 'bg-slate-800 hover:bg-slate-700' : 'bg-indigo-600 hover:bg-indigo-500'" 
                             class="px-5 py-2 text-sm font-bold text-white rounded-xl shadow-lg transition-colors"
                         >
                             {{ isMaintenanceActive ? 'Apagar Mantenimiento' : 'Activar Mantenimiento Seguro' }}

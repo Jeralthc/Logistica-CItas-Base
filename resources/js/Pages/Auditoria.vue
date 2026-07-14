@@ -72,7 +72,7 @@ const formatValores = (val) => {
     <AuthenticatedLayout>
         <template #header>
             <h2 class="font-bold text-2xl text-slate-800 leading-tight">
-                Centro de Auditoría <span class="text-red-600">| Bitácora Global</span>
+                Centro de Auditoría <span class="text-indigo-600">| Bitácora Global</span>
             </h2>
         </template>
 
@@ -83,11 +83,11 @@ const formatValores = (val) => {
                 <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6 flex flex-col sm:flex-row gap-4 items-end">
                     <div class="w-full sm:w-1/3">
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Búsqueda General</label>
-                        <input v-model="busqueda" type="text" placeholder="Usuario, acción, motivo, ID..." class="w-full rounded-xl border-slate-200 focus:border-red-500 focus:ring-red-500 text-sm">
+                        <input v-model="busqueda" type="text" placeholder="Usuario, acción, motivo, ID..." class="w-full rounded-xl border-slate-200 focus:border-indigo-500 focus:ring-indigo-500 text-sm">
                     </div>
                     <div class="w-full sm:w-1/4">
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Filtrar por Módulo</label>
-                        <select v-model="filtroModulo" class="w-full rounded-xl border-slate-200 focus:border-red-500 focus:ring-red-500 text-sm">
+                        <select v-model="filtroModulo" class="w-full rounded-xl border-slate-200 focus:border-indigo-500 focus:ring-indigo-500 text-sm">
                             <option value="">Todos los módulos</option>
                             <option v-for="m in modulos" :key="m" :value="m">{{ m }}</option>
                         </select>
@@ -135,7 +135,7 @@ const formatValores = (val) => {
                                         <div class="text-xs text-slate-500 mt-1">{{ log.user_role || 'Automático' }}</div>
                                     </td>
                                     <td class="px-6 py-4">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200 mb-1">
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 border border-indigo-200 mb-1">
                                             {{ log.module }}
                                         </span>
                                         <div class="font-bold text-slate-700 text-xs">{{ log.action }}</div>
@@ -148,7 +148,7 @@ const formatValores = (val) => {
                                     </td>
                                     <td class="px-6 py-4">
                                         <div v-if="log.old_values || log.new_values" class="text-xs space-y-1 font-mono">
-                                            <div v-if="log.old_values" class="text-red-600 bg-red-50 px-2 py-1 rounded max-w-xs truncate" :title="formatValores(log.old_values)">
+                                            <div v-if="log.old_values" class="text-indigo-600 bg-indigo-50 px-2 py-1 rounded max-w-xs truncate" :title="formatValores(log.old_values)">
                                                 - {{ formatValores(log.old_values) }}
                                             </div>
                                             <div v-if="log.new_values" class="text-emerald-600 bg-emerald-50 px-2 py-1 rounded max-w-xs truncate" :title="formatValores(log.new_values)">

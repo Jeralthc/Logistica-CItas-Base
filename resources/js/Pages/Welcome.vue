@@ -10,7 +10,7 @@ defineProps({
 <template>
     <Head title="Bienvenido al Sistema de Logística" />
 
-    <div class="bg-red-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
+    <div class="bg-indigo-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
         <div class="flex-1 text-left">
             <span>📞 0424-7170326</span>
         </div>
@@ -24,8 +24,8 @@ defineProps({
 
     <div class="min-h-screen bg-slate-950 flex flex-col justify-between items-center relative overflow-hidden text-white pt-24">
         <div class="absolute top-0 left-0 w-full h-full z-0 opacity-10">
-            <div class="absolute -top-1/4 -right-1/4 w-full h-full rounded-full bg-gradient-to-b from-red-600 to-transparent blur-3xl"></div>
-            <div class="absolute -bottom-1/4 -left-1/4 w-full h-full rounded-full bg-gradient-to-t from-red-800 to-transparent blur-3xl"></div>
+            <div class="absolute -top-1/4 -right-1/4 w-full h-full rounded-full bg-gradient-to-b from-indigo-600 to-transparent blur-3xl"></div>
+            <div class="absolute -bottom-1/4 -left-1/4 w-full h-full rounded-full bg-gradient-to-t from-indigo-800 to-transparent blur-3xl"></div>
         </div>
 
         <div class="relative z-10 text-center px-6 sm:px-8 max-w-6xl mx-auto flex-grow flex flex-col items-center justify-center pb-12">
@@ -36,7 +36,7 @@ defineProps({
                 </div>
                 <div class="text-left pr-4">
                    <h2 class="text-4xl font-black tracking-tighter text-white uppercase">Empresa Base</h2>
-                   <p class="text-[11px] uppercase font-black tracking-[0.3em] text-red-500">Logística</p>
+                   <p class="text-[11px] uppercase font-black tracking-[0.3em] text-indigo-500">Logística</p>
                 </div>
             </div>
 
@@ -52,7 +52,7 @@ defineProps({
                 <Link
                     v-if="$page.props.auth.user"
                     :href="route('dashboard')"
-                    class="px-10 py-4 text-lg font-semibold text-white bg-red-600 rounded-xl shadow-lg shadow-red-500/30 hover:bg-red-500 hover:shadow-red-500/50 transition-all duration-300 hover:-translate-y-1"
+                    class="px-10 py-4 text-lg font-semibold text-white bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/30 hover:bg-indigo-500 hover:shadow-indigo-500/50 transition-all duration-300 hover:-translate-y-1"
                 >
                     Ir al Panel de Control
                 </Link>
@@ -60,7 +60,7 @@ defineProps({
                 <template v-else>
                     <Link
                         :href="route('login')"
-                        class="px-10 py-4 text-lg font-semibold text-white bg-red-600 rounded-xl shadow-lg shadow-red-500/30 hover:bg-red-500 hover:shadow-red-500/50 transition-all duration-300 hover:-translate-y-1"
+                        class="px-10 py-4 text-lg font-semibold text-white bg-indigo-600 rounded-xl shadow-lg shadow-indigo-500/30 hover:bg-indigo-500 hover:shadow-indigo-500/50 transition-all duration-300 hover:-translate-y-1"
                     >
                         Iniciar Sesión
                     </Link>
@@ -68,7 +68,7 @@ defineProps({
                     <Link
                         v-if="canRegister"
                         :href="route('register')"
-                        class="px-10 py-4 text-lg font-semibold text-red-500 bg-transparent border-2 border-red-600 rounded-xl hover:bg-red-950 hover:text-white transition-all duration-300 hover:-translate-y-1"
+                        class="px-10 py-4 text-lg font-semibold text-indigo-500 bg-transparent border-2 border-indigo-600 rounded-xl hover:bg-indigo-950 hover:text-white transition-all duration-300 hover:-translate-y-1"
                     >
                         Registrar Usuario
                     </Link>
@@ -77,7 +77,7 @@ defineProps({
         </div>
 
         <!-- Corporate Footer -->
-        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-red-600 z-10">
+        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-indigo-600 z-10">
             <div class="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div>
                     <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">
