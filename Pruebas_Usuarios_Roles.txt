@@ -1,0 +1,10 @@
+Comprador/Proveedor
+jperez@gmail.com
+12345678
+-------------------------
+Recepción
+asuarez@gmail.com
+12345678
+
+
+
