@@ -1,11 +1,11 @@
 <script setup>
 import Checkbox from '@/Components/Checkbox.vue';
-import GuestLayout from '@/Layouts/GuestLayout.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref, onMounted } from 'vue';
 
 defineProps({
     canResetPassword: Boolean,
@@ -18,6 +18,14 @@ const form = useForm({
     remember: false,
 });
 
+const isLoaded = ref(false);
+
+onMounted(() => {
+    setTimeout(() => {
+        isLoaded.value = true;
+    }, 100);
+});
+
 const submit = () => {
     form.post(route('login'), {
         onFinish: () => form.reset('password'),
@@ -28,125 +36,147 @@ const submit = () => {
 <template>
     <Head title="Iniciar Sesión - Portal Logístico" />
 
-    <div class="bg-indigo-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
-        <div class="flex-1 text-left">
-            <span>📞 0424-7170326</span>
-        </div>
-        <div class="flex-1 text-center">
-            <span>✉️ contacto@tuempresa.com</span>
-        </div>
-        <div class="flex-1 text-right">
-            <span>🕒 Horario: 8:00 a.m. a 6:00 p.m.</span>
-        </div>
-    </div>
-
-    <div class="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200 text-slate-900 pt-24 flex flex-col items-center justify-between relative overflow-hidden">
+    <div class="min-h-screen bg-[#faf9f6] text-[#1c1c1c] font-sans relative overflow-hidden flex flex-col justify-between selection:bg-primary selection:text-white">
         
-        <!-- Decoración Corporativa Suave -->
-        <div class="absolute top-0 left-0 w-full h-[40vh] bg-slate-900 z-0" style="clip-path: polygon(0 0, 100% 0, 100% 100%, 0 80%);"></div>
+        <!-- Ambient Background Gradients -->
+        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+            <div class="absolute -top-[10%] -left-[5%] w-[45%] h-[45%] rounded-full bg-primary/5 blur-[120px]"></div>
+            <div class="absolute top-[35%] -right-[10%] w-[35%] h-[50%] rounded-full bg-primary/5 blur-[120px]"></div>
+        </div>
 
-        <div class="w-full flex-grow flex flex-col items-center justify-center z-10 px-4 pb-12">
-            <!-- Header del Formulario -->
-            <div class="text-center mb-8 flex flex-col items-center">
-                <div class="p-4 bg-white rounded-3xl shadow-lg flex items-center justify-center gap-3 border border-slate-100">
-                    <img src="/images/logo.png" alt="Logo Empresa Base" class="w-12 h-12 object-contain" />
-                    <div class="text-left pr-4">
-                       <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">Empresa Base</h2>
-                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-indigo-600">Logística</p>
+        <!-- Header Info Bar -->
+        <div class="w-full z-20 transition-all duration-700 ease-out"
+             :class="{ 'opacity-100 translate-y-0': isLoaded, 'opacity-0 -translate-y-10': !isLoaded }">
+            <div class="mx-auto max-w-7xl px-6 pt-4">
+                <div class="flex flex-col sm:flex-row items-center justify-between rounded-2xl bg-white/70 backdrop-blur-xl border border-[#eef0eb] px-6 py-3 shadow-sm gap-3 sm:gap-0">
+                    <Link href="/" class="flex items-center gap-2.5 group">
+                        <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-white shadow-sm transition-transform group-hover:scale-105">
+                            <svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.656 48.656 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3M1.5 12a48.655 48.655 0 00.138 3.662 4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M1.5 12l-3 3m3-3l3 3" />
+                            </svg>
+                        </div>
+                        <span class="text-sm font-extrabold tracking-tight text-[#1c1c1c]">LogiSync</span>
+                    </Link>
+                    <div class="flex flex-wrap justify-center items-center gap-4 text-[10px] text-[#6c7263] font-bold">
+                        <div class="flex items-center gap-1"><span class="text-primary">📞</span> 0424-7170326</div>
+                        <div class="flex items-center gap-1"><span class="text-primary">✉️</span> contacto@logisync.com</div>
+                        <div class="flex items-center gap-1"><span class="text-primary">🕒</span> Lun - Sáb: 8:00 AM - 6:00 PM</div>
                     </div>
                 </div>
-                <h2 class="text-3xl font-bold text-white mt-6 tracking-tight drop-shadow-md">
-                    Portal de Citas y Recepción
-                </h2>
-                <p class="text-slate-300 mt-2 text-lg font-medium">Acceso Seguro</p>
             </div>
-        <div class="w-full max-w-md bg-white p-10 border border-slate-200/60 rounded-3xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] mb-10">
-            <form @submit.prevent="submit">
+        </div>
+
+        <!-- Center Login Card -->
+        <div class="w-full flex-grow flex flex-col items-center justify-center z-10 px-4 py-10">
+            
+            <div class="w-full max-w-[400px] transition-all duration-1000 ease-out"
+                 :class="{ 'opacity-100 scale-100': isLoaded, 'opacity-0 scale-95': !isLoaded }">
                 
-                <div>
-                    <InputLabel for="username" value="Usuario / RIF" class="font-semibold text-slate-800" />
-                    <TextInput
-                        id="username"
-                        type="text"
-                        class="mt-2 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
-                        v-model="form.username"
-                        required
-                        autofocus
-                        autocomplete="username"
-                        placeholder="Ej: Recepcion.Romulo o J-12345678-9"
-                    />
-                    <InputError class="mt-2" :message="form.errors.username" />
+                <!-- Logo & Subtitle -->
+                <div class="text-center mb-6 flex flex-col items-center">
+                    <div class="p-3 bg-white border border-[#eef0eb] rounded-2xl shadow-sm flex items-center justify-center gap-3 backdrop-blur-md mb-5">
+                        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white shadow-sm shrink-0">
+                            <!-- LogiSync SVG Icon -->
+                            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.656 48.656 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3M1.5 12a48.655 48.655 0 00.138 3.662 4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M1.5 12l-3 3m3-3l3 3" />
+                            </svg>
+                        </div>
+                        <div class="text-left pr-3">
+                           <h2 class="text-base font-extrabold tracking-tight text-[#1c1c1c] uppercase leading-none">Empresa Base</h2>
+                           <p class="text-[8px] uppercase font-black tracking-wider text-primary mt-1">LOGÍSTICA</p>
+                        </div>
+                    </div>
+                    <h1 class="text-2xl font-extrabold text-[#1c1c1c] tracking-tight">
+                        Acceso Seguro
+                    </h1>
+                    <p class="text-[#6c7263] mt-1 text-xs font-semibold">Gestiona tus citas y recepciones logísticas</p>
                 </div>
 
-                <div class="mt-6">
-                    <InputLabel for="password" value="Contraseña" class="font-semibold text-slate-800" />
-                    <TextInput
-                        id="password"
-                        type="password"
-                        class="mt-2 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
-                        v-model="form.password"
-                        required
-                        autocomplete="current-password"
-                        placeholder="••••••••"
-                    />
-                    <InputError class="mt-2" :message="form.errors.password" />
-                </div>
+                <!-- Form Card -->
+                <div class="bg-white border border-[#eef0eb] p-6 sm:p-8 rounded-2xl shadow-sm relative overflow-hidden">
+                    
+                    <form @submit.prevent="submit" class="space-y-4">
+                        
+                        <div class="space-y-1">
+                            <InputLabel for="username" value="Usuario / RIF" class="font-bold text-[#1c1c1c] text-xs" />
+                            <TextInput
+                                id="username"
+                                type="text"
+                                class="block w-full border-[#eef0eb] rounded-xl text-xs px-3.5 py-2.5 bg-white focus:border-primary focus:ring-primary/20 placeholder-zinc-400"
+                                v-model="form.username"
+                                required
+                                autofocus
+                                autocomplete="username"
+                                placeholder="Ej: Recepcion.Romulo o J-12345678-9"
+                            />
+                            <InputError class="mt-1" :message="form.errors.username" />
+                        </div>
 
-                <div class="block mt-6 flex items-center justify-between">
-                    <label class="flex items-center">
-                        <Checkbox name="remember" v-model:checked="form.remember" class="border-slate-300 text-indigo-600 focus:ring-indigo-600" />
-                        <span class="ms-2 text-sm text-slate-600">Recordarme</span>
-                    </label>
-                    <Link
-                        v-if="canResetPassword"
-                        :href="route('password.request')"
-                        class="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-                    >
-                        ¿Olvidaste tu contraseña?
-                    </Link>
-                </div>
+                        <div class="space-y-1">
+                            <div class="flex items-center justify-between">
+                                <InputLabel for="password" value="Contraseña" class="font-bold text-[#1c1c1c] text-xs" />
+                                <Link
+                                    v-if="canResetPassword"
+                                    :href="route('password.request')"
+                                    class="text-[10px] text-primary hover:underline font-bold"
+                                >
+                                    ¿Olvidaste tu contraseña?
+                                </Link>
+                            </div>
+                            <TextInput
+                                id="password"
+                                type="password"
+                                class="block w-full border-[#eef0eb] rounded-xl text-xs px-3.5 py-2.5 bg-white focus:border-primary focus:ring-primary/20 placeholder-zinc-400"
+                                v-model="form.password"
+                                required
+                                autocomplete="current-password"
+                                placeholder="••••••••"
+                            />
+                            <InputError class="mt-1" :message="form.errors.password" />
+                        </div>
 
-                <div class="mt-8 flex flex-col gap-4 items-center">
-                    <PrimaryButton 
-                        class="w-full justify-center text-lg py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-2xl shadow-lg shadow-indigo-600/30 transition-all duration-300 hover:shadow-indigo-600/50 hover:-translate-y-0.5"
-                        :class="{ 'opacity-25': form.processing }"
-                        :disabled="form.processing"
-                    >
-                        INGRESAR
-                    </PrimaryButton>
+                        <div class="flex items-center">
+                            <Checkbox name="remember" v-model:checked="form.remember" class="border-[#eef0eb] text-primary focus:ring-primary/20" />
+                            <span class="ms-2 text-xs text-[#6c7263] font-semibold select-none">Recordarme en este equipo</span>
+                        </div>
 
-                    <Link :href="route('register')" class="text-sm text-slate-600 hover:text-indigo-600 font-medium">
-                        ¿No tienes una cuenta? <span class="text-indigo-600">Regístrate</span>
-                    </Link>
-                </div>
-            </form>
-        </div>
-        </div>
+                        <div class="pt-2 space-y-4">
+                            <PrimaryButton 
+                                class="w-full justify-center py-2.5 bg-primary hover:bg-[#4f46e5] text-white rounded-xl text-xs font-bold shadow-sm transition-all active:scale-95 uppercase tracking-wider"
+                                :class="{ 'opacity-50': form.processing }"
+                                :disabled="form.processing"
+                            >
+                                INGRESAR AL PORTAL
+                            </PrimaryButton>
 
-        <!-- Corporate Footer -->
-        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-indigo-600 z-10">
-            <div class="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12">
-                <div>
-                    <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">
-                        <img src="/images/logo.png" alt="Logo" class="w-6 h-6 grayscale brightness-200" />
-                        Empresa Base LOGÍSTICA
-                    </h3>
-                    <p class="text-sm leading-relaxed max-w-sm">
-                        Sistema integral para la gestión de citas, recepción de mercancía y optimización de tiempos en andén.
-                    </p>
-                </div>
-                <div>
-                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Soporte Técnico</h4>
-                    <ul class="space-y-2 text-sm">
-                        <li>📞 0424-7475109</li>
-                        <li>✉️ soporte@tuempresa.com</li>
-                        <li>🕒 Lunes a Lunes: 7:00 am - 10:00 pm</li>
-                    </ul>
+                            <div class="text-center text-xs">
+                                <span class="text-[#6c7263] font-semibold">¿No tienes una cuenta? </span>
+                                <Link :href="route('register')" class="text-primary hover:underline font-extrabold">
+                                    Regístrate aquí
+                                </Link>
+                            </div>
+                        </div>
+                    </form>
                 </div>
             </div>
-            <div class="max-w-6xl mx-auto px-6 mt-10 pt-6 border-t border-slate-800 text-xs text-center text-slate-500">
-                &copy; {{ new Date().getFullYear() }} Portal Logístico Empresa Base. Todos los derechos reservados. <br>
-                Desarrollado por el Departamento de Sistemas.
+        </div>
+
+        <!-- Footer -->
+        <footer class="relative z-10 border-t border-[#eef0eb] bg-white py-6 text-xs text-[#888c80]">
+            <div class="mx-auto max-w-7xl px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex items-center gap-2 font-semibold">
+                    <div class="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0">
+                        <svg class="h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.656 48.656 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3M1.5 12a48.655 48.655 0 00.138 3.662 4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M1.5 12l-3 3m3-3l3 3" />
+                        </svg>
+                    </div>
+                    <span>&copy; {{ new Date().getFullYear() }} LogiSync. Todos los derechos reservados.</span>
+                </div>
+                <div class="flex flex-wrap gap-x-6 gap-y-2 text-[10px] text-[#6c7263] justify-center font-bold">
+                    <span>Soporte: 📞 0424-7475109</span>
+                    <span>✉️ soporte@logisync.com</span>
+                    <span>🕒 Soporte Técnico: 7:00 AM - 10:00 PM</span>
+                </div>
             </div>
         </footer>
     </div>

@@ -24,7 +24,7 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($users as $userData) {
-            $password = in_array($userData['username'], ['Recepcion.Ana', 'Compras.Juan']) ? 'Empresa Base.2026' : 'Empresa Base2026';
+            $password = '12345678';
             User::updateOrCreate(
                 ['username' => $userData['username']],
                 [

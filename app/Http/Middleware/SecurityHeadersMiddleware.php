@@ -22,7 +22,11 @@ class SecurityHeadersMiddleware
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
-        $response->headers->set('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;");
+        if (app()->environment('local')) {
+            $response->headers->set('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;");
+        } else {
+            $response->headers->set('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: data: blob:;");
+        }
         
         // Evitar que el hosting (LiteSpeed/Cloudflare/Nginx) cachee páginas con sesiones cruzadas
         $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
