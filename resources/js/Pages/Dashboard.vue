@@ -2,7 +2,7 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import Modal from '@/Components/Modal.vue';
 import { Head } from '@inertiajs/vue3';
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import axios from 'axios';
 
 const numeroOrden = ref('');
@@ -16,6 +16,7 @@ const busquedaProducto = ref('');
 const operariosSeleccionados = ref(2);
 const tiempoOptimo = ref(null);
 const recalculando = ref(false);
+const productosVerificados = ref({});
 
 const citasProgramadas = ref([]);
 
@@ -60,7 +61,8 @@ const guardarReprogramacion = async () => {
     try {
         await axios.post(`/api/citas/${citaReprogramar.value.id}/reprogramar`, formReprogramar.value);
         mostrarModalReprogramar.value = false;
-        cargarCitas();
+        cargarCitas(); // Refrescar lista
+        // Si estábamos viendo el detalle de esta cita, buscar de nuevo
         if (numeroOrden.value === citaReprogramar.value.numero_oc) {
             buscarOrden();
         }
@@ -68,6 +70,194 @@ const guardarReprogramacion = async () => {
         errorReprogramacion.value = error.response?.data?.error || 'Error al reprogramar la cita.';
     } finally {
         procesandoReprogramacion.value = false;
+    }
+};
+
+// Factura del proveedor (Anular / Actualizar)
+const procesandoFactura = ref(false);
+const errorFactura = ref('');
+
+const anularFactura = async (cita) => {
+    if (!confirm('¿Estás seguro de que deseas anular y eliminar la factura actual?')) return;
+    procesandoFactura.value = true;
+    try {
+        await axios.post(`/api/citas/${cita.id}/anular-factura`);
+        cargarCitas();
+    } catch (error) {
+        alert(error.response?.data?.error || 'Error al anular factura');
+    } finally {
+        procesandoFactura.value = false;
+    }
+};
+
+const mostrarModalSubirFactura = ref(false);
+const citaSubirFactura = ref(null);
+const formFactura = ref({
+    numero_factura: '',
+    peso_factura_ton: '',
+    factura_file: null
+});
+const mostrarModalVideo = ref(false);
+const pasoTutorial = ref(0);
+const tutorialAutoPlay = ref(true);
+let tutorialTimer = null;
+
+const tutorialSlides = [
+    {
+        paso: 1,
+        titulo: "Paso 1: Notificación por Correo Electrónico",
+        descripcion: "El equipo de compras de Hipersuraki autoriza su orden de compra y el sistema le envía un correo con el número de ODC, sucursal de entrega y su usuario de acceso.",
+        badge: "📧 Correo de Compras",
+        imagen: "/manual_assets/paso2_login.png",
+        nota: "🔑 Su usuario de acceso es SIEMPRE el RIF de su empresa (ej: J-999999999)."
+    },
+    {
+        paso: 2,
+        titulo: "Paso 2: Inicio de Sesión (Usuario = Su RIF)",
+        descripcion: "Ingrese en https://citsur.suraki.net/login. Coloque en la casilla 'Usuario' el RIF de su empresa y en 'Contraseña' su clave registrada.",
+        badge: "🔑 Acceso con RIF",
+        imagen: "/manual_assets/paso2_login.png",
+        nota: "No use nombres personales; el RIF es el enlace con el ERP de Hipersuraki."
+    },
+    {
+        paso: 3,
+        titulo: "Paso 3: Panel 'Mis Citas' y Botón '+ AGENDAR NUEVA CITA'",
+        descripcion: "Al entrar a su portal verá su panel de citas. Para programar un nuevo despacho presione el botón rojo destacado '+ AGENDAR NUEVA CITA'.",
+        badge: "🚚 Mis Citas Agendadas",
+        imagen: "/manual_assets/paso3_dashboard_citas.png",
+        nota: "Desde aquí también puede descargar el manual PDF y consultar su historial."
+    },
+    {
+        paso: 4,
+        titulo: "Paso 4: Bandeja de Órdenes de Compra Habilitadas",
+        descripcion: "Ubique la orden de compra que desea entregar. Verifique la cantidad de productos y bultos, y presione el botón verde 'Agendar Cita'.",
+        badge: "📋 Órdenes Habilitadas",
+        imagen: "/manual_assets/paso4_portal_odc.png",
+        nota: "Solo se muestran las órdenes que el comprador ha autorizado para entrega."
+    },
+    {
+        paso: 5,
+        titulo: "Paso 5: Formulario Inteligente (Peso en TONELADAS)",
+        descripcion: "Ingrese su número de factura fiscal, tipo de vehículo y el peso real en TONELADAS (1 Ton = 1.000 Kg). Si despacha 50 Kg escriba 0.050.",
+        badge: "⚖️ Asistente de Peso",
+        imagen: "/manual_assets/paso5_formulario_inteligente.png",
+        nota: "⚠️ ¡Atención! No escriba kilos en lugar de toneladas para no inflar el tiempo de muelle."
+    },
+    {
+        paso: 6,
+        titulo: "Paso 6: Calendario de Turnos y Selección de Muelle",
+        descripcion: "Seleccione el día en el calendario, escoja un turno disponible marcado en verde, elija su muelle y presione 'Confirmar y Reservar Cita'.",
+        badge: "📅 Turnos Disponibles",
+        imagen: "/manual_assets/paso6_selector_horario.png",
+        nota: "Los miércoles la recepción cierra a las 11:00 AM. Llegue 15 minutos antes."
+    },
+    {
+        paso: 7,
+        titulo: "Paso 7: Cita Agendada Activa y Opciones de Gestión",
+        descripcion: "¡Listo! Su cita queda PROGRAMADA en la pestaña 'Activas'. Puede consultar el muelle, reprogramar por retrasos en carretera o actualizar la factura.",
+        badge: "✅ Cita Activa Programada",
+        imagen: "/manual_assets/paso7_cita_agendada.png",
+        nota: "Tiene botones para Reprogramar, Anular/Actualizar Factura y Cancelar Cita."
+    }
+];
+
+const iniciarTutorialTimer = () => {
+    detenerTutorialTimer();
+    if (tutorialAutoPlay.value) {
+        tutorialTimer = setInterval(() => {
+            pasoTutorial.value = (pasoTutorial.value + 1) % tutorialSlides.length;
+        }, 5500);
+    }
+};
+
+const detenerTutorialTimer = () => {
+    if (tutorialTimer) {
+        clearInterval(tutorialTimer);
+        tutorialTimer = null;
+    }
+};
+
+const toggleAutoPlay = () => {
+    tutorialAutoPlay.value = !tutorialAutoPlay.value;
+    if (tutorialAutoPlay.value) {
+        iniciarTutorialTimer();
+    } else {
+        detenerTutorialTimer();
+    }
+};
+
+const irPasoTutorial = (index) => {
+    pasoTutorial.value = index;
+    if (tutorialAutoPlay.value) {
+        iniciarTutorialTimer();
+    }
+};
+
+const anteriorPasoTutorial = () => {
+    pasoTutorial.value = (pasoTutorial.value - 1 + tutorialSlides.length) % tutorialSlides.length;
+    if (tutorialAutoPlay.value) {
+        iniciarTutorialTimer();
+    }
+};
+
+const siguientePasoTutorial = () => {
+    pasoTutorial.value = (pasoTutorial.value + 1) % tutorialSlides.length;
+    if (tutorialAutoPlay.value) {
+        iniciarTutorialTimer();
+    }
+};
+
+watch(mostrarModalVideo, (val) => {
+    if (val) {
+        pasoTutorial.value = 0;
+        tutorialAutoPlay.value = true;
+        iniciarTutorialTimer();
+    } else {
+        detenerTutorialTimer();
+    }
+});
+
+const abrirModalSubirFactura = (cita) => {
+    citaSubirFactura.value = cita;
+    formFactura.value = {
+        numero_factura: '',
+        peso_factura_ton: '',
+        factura_file: null
+    };
+    errorFactura.value = '';
+    mostrarModalSubirFactura.value = true;
+};
+
+const handleFacturaFileUpload = (e) => {
+    formFactura.value.factura_file = e.target.files[0];
+};
+
+const guardarNuevaFactura = async () => {
+    if (!formFactura.value.numero_factura || !formFactura.value.peso_factura_ton) {
+        errorFactura.value = 'El número de factura y el peso son obligatorios.';
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('numero_factura', formFactura.value.numero_factura);
+    formData.append('peso_factura_ton', formFactura.value.peso_factura_ton);
+    if (formFactura.value.factura_file) {
+        formData.append('factura_file', formFactura.value.factura_file);
+    }
+
+    procesandoFactura.value = true;
+    errorFactura.value = '';
+    
+    try {
+        await axios.post(`/api/citas/${citaSubirFactura.value.id}/actualizar-factura`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        mostrarModalSubirFactura.value = false;
+        cargarCitas();
+    } catch (error) {
+        errorFactura.value = error.response?.data?.error || 'Error al subir la factura.';
+    } finally {
+        procesandoFactura.value = false;
     }
 };
 
@@ -100,10 +290,12 @@ const continuarReprogramacion = () => {
         return;
     }
     
+    // Guardar la intención en localStorage
     localStorage.setItem('reprogramar_cita_id', citaReprogramar.value.id);
     localStorage.setItem('reprogramar_cita', JSON.stringify(citaReprogramar.value));
     localStorage.setItem('reprogramar_motivo', motivoReprogramacion.value);
     
+    // Redirigir a ReservarCita
     window.location.href = route('reservar-cita');
 };
 
@@ -162,8 +354,8 @@ const confirmarFinalizar = async () => {
     }
 };
 
-// Filtro por tipo de mercancía
-const filtroTipoMercancia = ref('todos');
+// Filtro por tipo de mercancía (Secos, Fruver, Perecederos)
+const filtroTipoMercancia = ref('todos'); // 'todos', 'secos', 'fruver', 'perecederos'
 
 const obtenerTipoCita = (tipoMercancia) => {
     if (!tipoMercancia) return 'secos';
@@ -186,7 +378,9 @@ const citasFiltradas = computed(() => {
     });
 });
 
-const pestanaCitas = ref('activas');
+const pestanaCitas = ref('activas'); // 'activas', 'finalizadas'
+const countActivas = ref(0);
+const countFinalizadas = ref(0);
 
 const cambiarPestanaCitas = (nueva) => {
     pestanaCitas.value = nueva;
@@ -203,6 +397,10 @@ const cargarCitas = async () => {
             params: { status: pestanaCitas.value }
         });
         citasProgramadas.value = resp.data.citas;
+        if (resp.data.counts) {
+            countActivas.value = resp.data.counts.activas || 0;
+            countFinalizadas.value = resp.data.counts.finalizadas || 0;
+        }
     } catch (e) {
         if (e.response?.status !== 503) console.error(e);
     } finally {
@@ -216,6 +414,7 @@ const buscarOrden = async () => {
     errorMensaje.value = '';
     datosOrden.value = null;
     productosOrden.value = [];
+    productosVerificados.value = {};
     datosExtra.value = null;
     tiempoOptimo.value = null;
 
@@ -225,11 +424,16 @@ const buscarOrden = async () => {
         if (completa.data.status === 'Exitoso' && completa.data.resumen) {
             datosOrden.value = completa.data.resumen;
             productosOrden.value = completa.data.detalles || [];
+            cargarVerificaciones(completa.data.resumen.Numero_OC);
             datosExtra.value = {
                 factura: completa.data.factura_proveedor,
                 factura_url: completa.data.factura_path,
                 fecha_orden: completa.data.fecha_orden,
                 fecha_recepcion: completa.data.fecha_recepcion,
+                fecha_envio_comprador: completa.data.fecha_envio_comprador,
+                fecha_registro_cita: completa.data.fecha_registro_cita,
+                fecha_completada: completa.data.fecha_completada,
+                completada_por_nombre: completa.data.completada_por_nombre,
                 status_orden: completa.data.status_orden,
                 status_texto: completa.data.status_texto,
                 tipo_vehiculo: completa.data.tipo_vehiculo,
@@ -242,10 +446,12 @@ const buscarOrden = async () => {
             return;
         }
     } catch (error) {
-        if (error.response && error.response.status === 404) {
-            errorMensaje.value = 'La Orden de Compra no existe en el ERP.';
+        if (error.response && error.response.status === 401) {
+            errorMensaje.value = 'Su sesión ha caducado. Por favor recargue la página (F5) o vuelva a iniciar sesión.';
+        } else if (error.response && error.response.status === 404) {
+            errorMensaje.value = error.response.data?.error || 'La Orden de Compra no existe en el ERP.';
         } else {
-            errorMensaje.value = 'Error de conexión con el servidor de datos.';
+            errorMensaje.value = error.response?.data?.error || 'Error de conexión con el servidor de datos.';
         }
     } finally {
         cargando.value = false;
@@ -267,6 +473,7 @@ const recalcularTiempo = async () => {
     finally { recalculando.value = false; }
 };
 
+// Escuchar evento de notificaciones para buscar orden
 const handleBuscarDesdeNotif = (e) => {
     numeroOrden.value = e.detail;
     buscarOrden();
@@ -278,6 +485,7 @@ onMounted(() => {
     window.addEventListener('actualizacion-tiempo-real', cargarCitas);
     cargarCitas();
     
+    // Polling independiente cada 60 segundos (1 minuto) para garantizar actualización sin saturar
     refreshInterval = setInterval(() => {
         cargarCitas();
     }, 60000);
@@ -288,627 +496,1255 @@ onUnmounted(() => {
     if (refreshInterval) clearInterval(refreshInterval);
 });
 
-const abrirModalSKU = () => { mostrarModalSKU.value = true; };
+const getNumeroOCActual = () => {
+    return (
+        datosOrden.value?.Numero_OC ||
+        datosOrden.value?.numero_oc ||
+        datosOrden.value?.orden_original ||
+        numeroOrden.value ||
+        ''
+    ).toString().trim();
+};
+
+const isProductoRevisado = (codigo) => {
+    if (!codigo) return false;
+    return !!productosVerificados.value[String(codigo).trim()];
+};
+
+const abrirModalSKU = () => { 
+    mostrarModalSKU.value = true; 
+    const numOc = getNumeroOCActual();
+    if (numOc) {
+        cargarVerificaciones(numOc);
+    }
+};
 const cerrarModalSKU = () => { mostrarModalSKU.value = false; busquedaProducto.value = ''; };
+
+const cargarVerificaciones = async (numOcInput) => {
+    const numOc = (numOcInput || getNumeroOCActual()).toString().trim();
+    if (!numOc) return;
+    const localKey = `odc_verificados_${numOc}`;
+    try {
+        const cached = localStorage.getItem(localKey);
+        if (cached) {
+            const arr = JSON.parse(cached);
+            if (Array.isArray(arr)) {
+                const map = {};
+                arr.forEach(c => { if(c) map[String(c).trim()] = true; });
+                productosVerificados.value = map;
+            }
+        }
+    } catch(e){}
+
+    try {
+        const resp = await axios.get(`/api/odc/${numOc}/verificaciones`);
+        if (resp.data.status === 'Exitoso' && Array.isArray(resp.data.verificados)) {
+            const map = {};
+            resp.data.verificados.forEach(c => { if(c) map[String(c).trim()] = true; });
+            productosVerificados.value = map;
+            localStorage.setItem(localKey, JSON.stringify(Object.keys(map)));
+        }
+    } catch(e){}
+};
+
+const toggleVerificarProducto = async (codigoInput) => {
+    const numOc = getNumeroOCActual();
+    if (!numOc || !codigoInput) return;
+    const codigo = String(codigoInput).trim();
+    const localKey = `odc_verificados_${numOc}`;
+
+    const map = { ...productosVerificados.value };
+    const estaRevisado = !map[codigo];
+
+    if (estaRevisado) {
+        map[codigo] = true;
+    } else {
+        delete map[codigo];
+    }
+    productosVerificados.value = map;
+
+    try {
+        localStorage.setItem(localKey, JSON.stringify(Object.keys(map)));
+    } catch(e){}
+
+    try {
+        const resp = await axios.post(`/api/odc/${numOc}/verificar-producto`, {
+            codigo_producto: codigo,
+            revisado: estaRevisado
+        });
+        if (resp.data.status === 'Exitoso' && Array.isArray(resp.data.verificados)) {
+            const updatedMap = {};
+            resp.data.verificados.forEach(c => { if(c) updatedMap[String(c).trim()] = true; });
+            productosVerificados.value = updatedMap;
+            localStorage.setItem(localKey, JSON.stringify(Object.keys(updatedMap)));
+        }
+    } catch(e) {
+        console.error('Error al verificar producto:', e);
+    }
+};
+
+const toggleVerificarTodos = async () => {
+    const numOc = getNumeroOCActual();
+    if (!numOc || !productosFiltrados.value.length) return;
+    const localKey = `odc_verificados_${numOc}`;
+
+    const todosCodigos = productosFiltrados.value
+        .map(p => p.codigo ? String(p.codigo).trim() : null)
+        .filter(Boolean);
+
+    const todosEstanRevisados = todosCodigos.every(c => isProductoRevisado(c));
+    const nuevoEstado = !todosEstanRevisados;
+
+    const map = { ...productosVerificados.value };
+    todosCodigos.forEach(c => {
+        if (nuevoEstado) map[c] = true;
+        else delete map[c];
+    });
+    productosVerificados.value = map;
+
+    try {
+        localStorage.setItem(localKey, JSON.stringify(Object.keys(map)));
+    } catch(e){}
+
+    try {
+        const resp = await axios.post(`/api/odc/${numOc}/verificar-todos`, {
+            codigos: todosCodigos,
+            revisado: nuevoEstado
+        });
+        if (resp.data.status === 'Exitoso' && Array.isArray(resp.data.verificados)) {
+            const updatedMap = {};
+            resp.data.verificados.forEach(c => { if(c) updatedMap[String(c).trim()] = true; });
+            productosVerificados.value = updatedMap;
+            localStorage.setItem(localKey, JSON.stringify(Object.keys(updatedMap)));
+        }
+    } catch(e) {
+        console.error('Error al verificar todos los productos:', e);
+    }
+};
+
+const totalVerificados = computed(() => {
+    if (!productosOrden.value.length) return 0;
+    return productosOrden.value.filter(p => p.codigo && isProductoRevisado(p.codigo)).length;
+});
 
 const productosFiltrados = computed(() => {
     if (!busquedaProducto.value) return productosOrden.value;
-    return productosOrden.value.filter(p => 
-        (p.codigo && p.codigo.toLowerCase().includes(busquedaProducto.value.toLowerCase())) ||
-        (p.producto && p.producto.toLowerCase().includes(busquedaProducto.value.toLowerCase()))
+    const t = busquedaProducto.value.toLowerCase();
+    return productosOrden.value.filter(p =>
+        (p.codigo && p.codigo.toLowerCase().includes(t)) ||
+        (p.producto && p.producto.toLowerCase().includes(t))
     );
 });
 
-const totalBultos = computed(() => {
-    return productosOrden.value.reduce((sum, p) => sum + Math.round(p.bultos || 0), 0);
-});
-
-const formatMinutos = (mins) => {
-    if (mins === null || mins === undefined) return '—';
-    if (mins < 60) return `${mins} minutos`;
-    const hrs = Math.floor(mins / 60);
-    const rest = mins % 60;
-    return rest > 0 ? `${hrs}h y ${rest}m` : `${hrs} horas`;
-};
-
-const formatRangoHora = (fechaInicio, duracion) => {
-    if (!fechaInicio) return '—';
-    const ini = new Date(fechaInicio);
-    const fin = new Date(ini.getTime() + (duracion * 60000));
-    
-    const fmt = (d) => d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
-    return `${fmt(ini)} - ${fmt(fin)}`;
-};
-
-const getSucursalNombre = (muelle) => {
-    if (!muelle) return '—';
-    const m = String(muelle);
-    if (m === '0101') return '0101 (Hiper)';
-    if (m === '0102') return '0102 (Dep Gral)';
-    if (m === '0111') return '0111 (Producción)';
-    if (m === '0115') return '0115 (Insumos)';
-    if (m === '0161') return '0161 (Andinka)';
-    return `Muelle ${m}`;
-};
-
-const getVehiculoNombre = (tipo) => {
-    const t = String(tipo);
-    if (t === '1') return { nombre: 'Camión Grande (750 Cajas)', cap: '750 Cajas', frio: false };
-    if (t === '2') return { nombre: 'Camión Mediano (350 Cajas)', cap: '350 Cajas', frio: false };
-    if (t === '3') return { nombre: 'Camioneta (120 Cajas)', cap: '120 Cajas', frio: false };
-    if (t === '4') return { nombre: 'Camión C-350 / Frio (300 Cajas)', cap: '300 Cajas', frio: true };
-    if (t === '5') return { nombre: 'Gandola Frio (1100 Cajas)', cap: '1100 Cajas', frio: true };
-    if (t === '6') return { nombre: 'Turbo / Frio (350 Cajas)', cap: '350 Cajas', frio: true };
-    return { nombre: 'Otro Vehículo', cap: 'N/D', frio: false };
-};
-
-const statusColor = (status) => {
-    if (status === 'C') return 'bg-emerald-100 text-emerald-800';
-    if (status === 'A' || status === '1') return 'bg-blue-100 text-blue-800';
-    return 'bg-amber-100 text-amber-800';
-};
-
-const citaStatusColor = (status) => {
-    const s = status?.toLowerCase();
-    if (s === 'completada' || s === 'finalizada' || s === 'recibida') return 'bg-emerald-50 text-emerald-700 border border-emerald-100';
-    if (s === 'cancelada') return 'bg-rose-50 text-rose-700 border border-rose-100';
-    if (s === 'demorada' || s === 'retrasada') return 'bg-red-50 text-red-700 border border-red-100';
-    if (s === 'reprogramada') return 'bg-amber-50 text-amber-700 border border-amber-100';
-    return 'bg-blue-50 text-blue-700 border border-blue-100'; // 'programada'
-};
-
 const categoriaPorFactor = (factor) => {
-    const f = parseFloat(factor);
-    if (f >= 1.5) return { texto: 'Alto Rendimiento', color: 'bg-emerald-50 text-emerald-700 border border-emerald-100', icono: '⚡' };
-    if (f >= 0.8) return { texto: 'Estándar', color: 'bg-blue-50 text-blue-700 border border-blue-100', icono: '📦' };
-    return { texto: 'Bajo Rendimiento', color: 'bg-amber-50 text-amber-700 border border-amber-100', icono: '🐢' };
+    const c = {
+        1: { texto: 'Grande', color: 'bg-emerald-100 text-emerald-700', icono: '📦' },
+        2: { texto: 'Mediano', color: 'bg-blue-100 text-blue-700', icono: '📋' },
+        3: { texto: 'Pequeño', color: 'bg-amber-100 text-amber-700', icono: '📎' },
+        4: { texto: 'Micro', color: 'bg-red-100 text-red-700', icono: '🔸' },
+    };
+    return c[factor] || { texto: 'N/A', color: 'bg-slate-100 text-slate-600', icono: '❓' };
 };
 
-const imprimirTicket = () => { window.print(); };
+const totalBultos = computed(() => productosOrden.value.reduce((s, p) => s + (Number(p.bultos) || 0), 0));
 
-// === NUEVO: CÁLCULOS DINÁMICOS PARA KPIS (Estilo Lovable) ===
-const kpis = computed(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    
-    // 1. Citas programadas para hoy
-    const citasHoy = citasProgramadas.value.filter(c => c.fecha_cita && c.fecha_cita.startsWith(todayStr));
-    
-    // 2. Ocupación de Andenes (cantidad de muelles distintos que tienen citas activas hoy)
-    const andenesOcupados = new Set(
-        citasProgramadas.value
-            .filter(c => c.fecha_cita && c.fecha_cita.startsWith(todayStr) && c.estatus === 'programada')
-            .map(c => c.muelle_asignado)
-    ).size;
-    
-    // 3. Tiempo promedio de descarga (calculado de duraciones de las citas)
-    const citasConDuracion = citasProgramadas.value.filter(c => c.duracion_minutos > 0);
-    const promMinutos = citasConDuracion.length > 0
-        ? Math.round(citasConDuracion.reduce((sum, c) => sum + c.duracion_minutos, 0) / citasConDuracion.length)
-        : 45;
+const formatFecha = (f) => {
+    if (!f) return '—';
+    const d = new Date(f);
+    return d.toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
-    // 4. Esperando (citas en estatus programada para hoy)
-    const enEspera = citasHoy.filter(c => c.estatus === 'programada').length;
+const formatHora = (f) => {
+    if (!f) return '—';
+    return new Date(f).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+};
 
-    return [
-        { title: 'Citas de hoy', value: citasHoy.length, detail: 'Registradas en sistema', color: 'text-primary' },
-        { title: 'Ocupación de muelles', value: `${andenesOcupados}/8`, detail: 'Andenes activos hoy', color: 'text-indigo-600' },
-        { title: 'Promedio descarga', value: `${promMinutos}m`, detail: 'Calculado automáticamente', color: 'text-amber-600' },
-        { title: 'Camiones esperando', value: enEspera, detail: 'En fila o programados', color: 'text-emerald-600' }
-    ];
-});
+const formatFechaHora = (f) => {
+    if (!f) return '—';
+    const isSoloFecha = typeof f === 'string' && (f.includes('00:00:00') || !f.includes(':'));
+    const d = new Date(f);
+    if (isNaN(d.getTime())) return f;
+    const fecha = d.toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (isSoloFecha) {
+        return fecha;
+    }
+    const hora = d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${fecha} · ${hora}`;
+};
 
-// === NUEVO: CÁLCULOS DINÁMICOS PARA ESTADO DE ANDENES (A-01 al A-08) ===
-const andenes = computed(() => {
-    // Listado de códigos de muelles según controlador
-    const codigosMuelle = ['01', '02', '03', '04', '0101', '0102', '0111', '0115'];
-    const names = ['Andén A-01', 'Andén A-02', 'Andén A-03', 'Andén A-04', 'Muelle Express', 'Depósito General', 'Producción', 'Insumos'];
+const formatRangoHora = (fechaInicio, duracionMinutos) => {
+    if (!fechaInicio) return '—';
+    const durMin = Math.min(240, Math.max(30, Number(duracionMinutos) || 45));
+    const inicio = new Date(fechaInicio);
+    const fin = new Date(inicio.getTime() + (durMin * 60000));
+    const strInicio = inicio.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const strFin = fin.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${strInicio} - ${strFin}`;
+};
 
-    const todayStr = new Date().toISOString().split('T')[0];
+const statusColor = (s) => {
+    const m = { DWT: 'bg-amber-100 text-amber-700', DPE: 'bg-blue-100 text-blue-700', DCO: 'bg-emerald-100 text-emerald-700', DAN: 'bg-red-100 text-red-700' };
+    return m[s] || 'bg-slate-100 text-slate-600';
+};
 
-    return codigosMuelle.map((codigo, idx) => {
-        // Buscar cita hoy en este muelle en estatus 'programada'
-        const citaActiva = citasProgramadas.value.find(c => 
-            String(c.muelle_asignado) === String(codigo) && 
-            c.fecha_cita && 
-            c.fecha_cita.startsWith(todayStr) && 
-            c.estatus === 'programada'
-        );
+const citaStatusColor = (s) => {
+    const m = { 
+        programada: 'bg-amber-100 text-amber-700', 
+        'en muelle': 'bg-blue-100 text-blue-700', 
+        finalizada: 'bg-emerald-100 text-emerald-700', 
+        cancelada: 'bg-red-100 text-red-700' 
+    };
+    return m[s] || 'bg-slate-100 text-slate-600';
+};
 
-        let status = 'Libre';
-        let badgeColor = 'bg-emerald-50 text-emerald-700 border-[#eef0eb]';
-        let dotColor = 'bg-emerald-500';
-        let detail = 'Listo para recibir';
+const esCitaTraslado = (cita) => {
+    if (!cita) return false;
+    const esBool = cita.es_traslado_interno === true || cita.es_traslado_interno === 1 || cita.es_traslado_interno === '1';
+    const esTI = typeof cita.numero_oc === 'string' && cita.numero_oc.toUpperCase().startsWith('TI-');
+    return Boolean(esBool || esTI);
+};
 
-        if (citaActiva) {
-            status = 'Descargando';
-            badgeColor = 'bg-blue-50 text-blue-700 border-blue-100 animate-pulse';
-            dotColor = 'bg-blue-500';
-            detail = `OC: ${citaActiva.numero_oc} - ${citaActiva.proveedor}`;
-        }
+const formatMinutos = (m) => {
+    if (!m) return '—';
+    if (m < 60) return `${m} minutos`;
+    const h = Math.floor(m / 60);
+    const r = m % 60;
+    const hText = h === 1 ? 'hora' : 'horas';
+    return r > 0 ? `${h} ${hText} ${r} min` : `${h} ${hText}`;
+};
 
-        return {
-            id: codigo,
-            name: names[idx],
-            status,
-            badgeColor,
-            dotColor,
-            detail
-        };
-    });
-});
+const imprimirTicket = () => {
+    window.print();
+};
+
+const getVehiculoNombre = (codigo) => {
+    const map = {
+        'minivan': { nombre: 'Minivan / Super Carry', cap: 'Hasta 950 kg | 2.5 - 4.5 m³', frio: false },
+        'camioneta_panel': { nombre: 'Camioneta Carga / Panel', cap: '700 kg - 1.5 Ton | 3 - 6 m³', frio: false },
+        'cava_pequena': { nombre: 'Camión 350 / Cava Pequeña', cap: '2.5 - 3.5 Ton | 10 - 15 m³', frio: true },
+        'camion_liviano': { nombre: 'Camión Liviano (NPR / FVR 71)', cap: '4.5 - 5.5 Ton | 20 - 25 m³', frio: false },
+        'camion_mediano': { nombre: 'Camión Mediano (NQR / Cargo 815)', cap: '6.5 - 8 Ton | 30 - 35 m³', frio: false },
+        'camion_sencillo': { nombre: 'Camión Sencillo (Rígido Pesado)', cap: '8 - 12 Ton | 40 - 45 m³', frio: false },
+        'camion_toronto': { nombre: 'Camión Toronto / Balancín', cap: '14 - 18 Ton | 45 - 55 m³', frio: false },
+        'gandola_furgon': { nombre: 'Gandola con Furgón (48-53 pies)', cap: '24 - 30 Ton | 90 - 110 m³', frio: false },
+        'gandola_sider': { nombre: 'Gandola Sider (Cortina Lateral)', cap: '24 - 28 Ton | 90 - 105 m³', frio: false },
+        // Legacy values (citas antiguas)
+        'turbo': { nombre: 'Camión 350 / Cava Pequeña (Turbo)', cap: '2.5 - 3.5 Ton | 10 - 15 m³', frio: false },
+        'sencillo': { nombre: 'Camión Sencillo (Rígido Pesado)', cap: '8 - 12 Ton | 40 - 45 m³', frio: false },
+        'gandola': { nombre: 'Gandola con Furgón (48-53 pies)', cap: '24 - 30 Ton | 90 - 110 m³', frio: false },
+    };
+    return map[codigo] || { nombre: codigo || 'No especificado', cap: '', frio: false };
+};
+
+const getSucursalNombre = (codigo) => {
+    const map = {
+        '0101': 'Hipersuraki',
+        '0102': 'Depósito General',
+        '0111': 'Producción',
+        '0115': 'Insumos',
+        '0161': 'Andinka',
+        '01': 'Galpón Central',
+        '02': 'Galpón Central',
+        '03': 'Galpón Central',
+        '04': 'Galpón Central'
+    };
+    return map[codigo] || codigo;
+};
 </script>
 
 <template>
-    <Head title="Centro de Control" />
+    <Head title="Panel de Logística" />
     <AuthenticatedLayout class="print:hidden">
-        
-        <div class="space-y-6 animate-fade-in">
-            <!-- Header Section -->
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#eef0eb] pb-4">
-                <div>
-                    <h1 class="text-2xl font-extrabold tracking-tight text-[#1c1c1c]">
-                        <span v-if="$page.props.auth.user.role === 'proveedor'">Mis Citas Agendadas</span>
-                        <span v-else>Centro de Control</span>
-                    </h1>
-                    <p class="text-xs text-[#6c7263] mt-1 font-medium">Monitoreo operativo de muelles, análisis de tiempos y registro de recepciones en tiempo real.</p>
-                </div>
-            </div>
-
-            <!-- KPI GRID (Estilo Lovable) -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div v-for="(kpi, idx) in kpis" :key="idx" class="bg-white p-5 rounded-2xl border border-[#eef0eb] shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
-                    <div class="flex items-center justify-between">
-                        <span class="text-[9px] font-black uppercase tracking-widest text-[#888c80]">{{ kpi.title }}</span>
-                        <!-- KPI Icon based on title -->
-                        <div class="w-7 h-7 rounded-lg bg-[#faf9f6] flex items-center justify-center border border-[#eef0eb]">
-                            <svg v-if="kpi.title.includes('Citas')" class="w-3.5 h-3.5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                            <svg v-else-if="kpi.title.includes('Ocupación')" class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-                            <svg v-else-if="kpi.title.includes('Promedio')" class="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <svg v-else class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0zM13 5H4v10h18V8.5L18.5 5H13z"></path></svg>
-                        </div>
-                    </div>
-                    <div class="mt-3 flex items-baseline gap-1.5">
-                        <span class="text-3.5 font-extrabold tracking-tight text-[#1c1c1c]">{{ kpi.value }}</span>
-                    </div>
-                    <span class="text-[10px] text-[#6c7263] font-bold mt-1.5 flex items-center gap-1">
-                        <span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
-                        {{ kpi.detail }}
+        <template #header>
+            <div class="flex items-center justify-between print:hidden">
+                <h2 class="font-bold text-2xl text-slate-800 leading-tight">
+                    <span v-if="$page.props.auth.user.role === 'proveedor'">
+                        <span v-if="$page.props.auth.user.es_galpon || $page.props.auth.user.username === 'GALPON.ALFONSO'">Portal de Galpón <span class="text-indigo-600">| Traslados Internos</span></span>
+                        <span v-else>Portal del Proveedor <span class="text-red-600">| Mis Citas</span></span>
                     </span>
+                    <span v-else>Módulo de Recepción <span class="text-red-600">| Control de Citas</span></span>
+                </h2>
+                <div class="text-sm font-medium text-slate-500 bg-slate-100 px-4 py-1 rounded-full border border-slate-200">
+                    Sincronizado con ERP
                 </div>
             </div>
+        </template>
 
-            <!-- DOCKS STATUS GRID (Estado de Andenes - Estilo Lovable) -->
-            <div class="bg-white border border-[#eef0eb] rounded-2xl p-5 shadow-sm">
-                <div class="flex items-center justify-between border-b border-[#eef0eb] pb-3 mb-5">
-                    <div>
-                        <h2 class="text-sm font-extrabold text-[#1c1c1c] flex items-center gap-2">
-                            <span class="flex h-2 w-2 rounded-full bg-primary animate-pulse"></span>
-                            Monitor en Tiempo Real de Andenes
-                        </h2>
-                        <p class="text-xs text-[#6c7263] mt-0.5 font-medium">Asignación física de camiones y muelles operativos.</p>
-                    </div>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div v-for="anden in andenes" :key="anden.id" 
-                        class="border rounded-2xl p-4 flex flex-col justify-between hover:bg-[#faf9f6] transition-all duration-300 relative overflow-hidden"
-                        :class="anden.status === 'Descargando' ? 'border-primary/25 bg-primary/[0.01] shadow-sm' : 'border-[#eef0eb] bg-white'">
-                        
-                        <!-- Top status badge -->
-                        <div class="flex items-center justify-between gap-2 border-b border-[#eef0eb]/50 pb-2 mb-3">
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-1.5 h-1.5 rounded-full" :class="anden.status === 'Descargando' ? 'bg-primary animate-ping' : 'bg-emerald-500'"></div>
-                                <span class="text-xs font-extrabold text-[#1c1c1c]">{{ anden.name }}</span>
+        <div class="py-10 bg-slate-50 min-h-screen print:hidden">
+            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+
+                <!-- BÚSQUEDA -->
+                <div v-if="$page.props.auth.user.role !== 'proveedor'" class="bg-white overflow-hidden shadow-xl shadow-slate-200/50 sm:rounded-3xl p-8 mb-8 border border-slate-100">
+                    <div class="max-w-xl">
+                        <h3 class="text-sm font-bold text-red-600 uppercase tracking-widest mb-2">Búsqueda rápida</h3>
+                        <p class="text-slate-500 mb-6">Ingrese el número de la Orden de Compra para calcular tiempos y ciclos de descarga.</p>
+                        <div class="flex gap-3">
+                            <div class="relative flex-grow">
+                                <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                </span>
+                                <input v-model="numeroOrden" @keyup.enter="buscarOrden" type="text" placeholder="Ej: E00001167"
+                                    class="block w-full pl-11 pr-4 py-3 border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-2xl transition-all shadow-sm">
                             </div>
-                            <span :class="anden.badgeColor" class="text-[8px] font-black px-2 py-0.5 rounded-lg border uppercase tracking-wider">
-                                {{ anden.status }}
-                            </span>
+                            <button @click="buscarOrden" :disabled="cargando"
+                                class="bg-red-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95 disabled:opacity-50">
+                                <span v-if="cargando">Buscando...</span>
+                                <span v-else>BUSCAR</span>
+                            </button>
                         </div>
-                        <!-- Dock Body -->
-                        <div class="py-1">
-                            <div v-if="anden.status === 'Descargando'" class="space-y-1">
-                                <span class="text-[8px] font-black text-[#888c80] uppercase tracking-wider leading-none">OC Activa</span>
-                                <p class="text-xs font-bold text-[#1c1c1c] font-mono leading-none">{{ anden.detail.split(' - ')[0] }}</p>
-                                <p class="text-[10px] text-[#6c7263] font-semibold truncate leading-tight mt-1">{{ anden.detail.split(' - ')[1] }}</p>
-                            </div>
-                            <div v-else class="py-2 text-center text-[10px] text-[#888c80] font-bold uppercase tracking-wider flex items-center justify-center gap-1">
-                                <span>📥</span> Disponible
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- BÚSQUEDA RÁPIDA ERP -->
-            <div v-if="$page.props.auth.user.role !== 'proveedor'" class="bg-white border border-[#eef0eb] rounded-2xl p-5 shadow-sm">
-                <div class="max-w-xl">
-                    <h3 class="text-xs font-black text-primary uppercase tracking-widest mb-1">Diagnóstico Rápido ERP</h3>
-                    <p class="text-xs text-[#6c7263] mb-4 font-medium">Consulta y estima tiempos óptimos de descarga directamente desde los registros del ERP.</p>
-                    <div class="flex gap-2">
-                        <div class="relative flex-grow">
-                            <input v-model="numeroOrden" @keyup.enter="buscarOrden" type="text" placeholder="Ej: E00001167"
-                                class="block w-full px-4 py-2.5 border-[#eef0eb] bg-[#faf9f6] focus:border-primary focus:ring-primary/20 rounded-xl transition-all text-xs font-bold font-mono uppercase">
-                        </div>
-                        <button @click="buscarOrden" :disabled="cargando"
-                            class="bg-[#1c1c1c] text-white hover:bg-zinc-800 px-5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-50 uppercase tracking-wider">
-                            {{ cargando ? 'Buscando...' : 'BUSCAR' }}
-                        </button>
-                    </div>
-                    <p v-if="errorMensaje" class="text-rose-500 font-bold mt-2 text-xs">⚠️ {{ errorMensaje }}</p>
-                </div>
-            </div>
-
-            <!-- PANEL DE CITAS AGENDADAS (TABLA PRINCIPAL) -->
-            <div class="bg-white border border-[#eef0eb] rounded-2xl shadow-sm overflow-hidden">
-                
-                <div class="px-6 py-5 border-b border-[#eef0eb] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                        <h2 class="text-lg font-bold text-[#1c1c1c]">Agenda de Entregas</h2>
-                        <p class="text-xs text-[#6c7263] mt-0.5">Control cronológico de citas y recepciones.</p>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <Link v-if="$page.props.auth.user.role === 'proveedor'" href="/reservar-cita" class="bg-primary hover:bg-[#4f46e5] text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg shadow-primary/25 transition-all flex items-center gap-1.5">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
-                            AGENDAR CITA
-                        </Link>
-                        <button @click="cargarCitas" class="p-2 border border-[#eef0eb] hover:bg-[#fcfbf8] text-[#6c7263] rounded-xl transition-colors" title="Actualizar">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                        </button>
+                        <p v-if="errorMensaje" class="text-red-500 font-medium mt-3 text-sm">⚠️ {{ errorMensaje }}</p>
                     </div>
                 </div>
 
-                <!-- Tabs de Filtro de Citas -->
-                <div class="flex border-b border-[#eef0eb] bg-[#fcfbf8]/40 px-6 gap-6">
-                    <button @click="cambiarPestanaCitas('activas')" 
-                        class="text-xs font-bold uppercase tracking-wider py-3.5 border-b-2 transition-all"
-                        :class="pestanaCitas === 'activas' ? 'border-primary text-primary font-black' : 'border-transparent text-[#888c80] hover:text-[#1c1c1c]'">
-                        Citas Activas
-                    </button>
-                    <button @click="cambiarPestanaCitas('finalizadas')" 
-                        class="text-xs font-bold uppercase tracking-wider py-3.5 border-b-2 transition-all"
-                        :class="pestanaCitas === 'finalizadas' ? 'border-primary text-primary font-black' : 'border-transparent text-[#888c80] hover:text-[#1c1c1c]'">
-                        Historial Completadas
-                    </button>
-                </div>
-
-                <!-- Filtro de Categorías -->
-                <div v-if="$page.props.auth.user.role !== 'proveedor'" class="flex flex-wrap items-center gap-2 px-6 py-3 bg-[#fcfbf8]/10 border-b border-[#eef0eb]">
-                    <span class="text-[10px] font-bold text-[#888c80] uppercase tracking-wider mr-2">Mercancía:</span>
-                    
-                    <button @click="filtroTipoMercancia = 'todos'"
-                        class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
-                        :class="filtroTipoMercancia === 'todos' ? 'bg-[#1c1c1c] text-white border-[#1c1c1c]' : 'bg-white text-[#6c7263] border-[#eef0eb] hover:bg-[#fcfbf8]'">
-                        Todos
-                    </button>
-                    
-                    <button @click="filtroTipoMercancia = 'secos'"
-                        class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
-                        :class="filtroTipoMercancia === 'secos' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-white text-[#6c7263] border-[#eef0eb] hover:bg-orange-50/30'">
-                        Secos
-                    </button>
-                    
-                    <button @click="filtroTipoMercancia = 'fruver'"
-                        class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
-                        :class="filtroTipoMercancia === 'fruver' ? 'bg-lime-50 text-lime-700 border-lime-200' : 'bg-white text-[#6c7263] border-[#eef0eb] hover:bg-lime-50/30'">
-                        Fruver
-                    </button>
-                    
-                    <button @click="filtroTipoMercancia = 'perecederos'"
-                        class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
-                        :class="filtroTipoMercancia === 'perecederos' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-white text-[#6c7263] border-[#eef0eb] hover:bg-rose-50/30'">
-                        Perecederos
-                    </button>
-                </div>
-
-                <!-- Citas List -->
-                <div v-if="citasFiltradas.length > 0" class="divide-y divide-[#eef0eb]">
-                    <div v-for="cita in citasFiltradas" :key="cita.id" class="px-6 py-5 flex flex-col lg:flex-row lg:items-center justify-between hover:bg-[#fcfbf8]/30 transition-colors group gap-4">
-                        <div class="flex items-start sm:items-center gap-4.5 min-w-0">
-                            <!-- Fecha Block -->
-                            <div class="w-14 h-14 shrink-0 bg-[#f5f6f2] rounded-2xl flex flex-col items-center justify-center border border-[#eef0eb]">
-                                <span class="text-[9px] font-bold text-[#888c80] uppercase">{{ new Date(cita.fecha_cita).toLocaleDateString('es-VE', { month: 'short' }) }}</span>
-                                <span class="text-xl font-extrabold text-[#1c1c1c] -mt-0.5">{{ new Date(cita.fecha_cita).getDate() }}</span>
-                            </div>
-
-                            <div class="min-w-0">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <p class="font-bold text-[#1c1c1c] font-mono text-base">{{ cita.numero_oc }}</p>
-                                    <span :class="citaStatusColor(cita.estatus)" class="text-[9px] font-black px-2 py-0.5 rounded-full uppercase">{{ cita.estatus }}</span>
-                                    <span v-if="cita.tipo_mercancia" class="text-[9px] font-black px-2 py-0.5 rounded-full uppercase border"
-                                        :class="{
-                                            'bg-orange-50 text-orange-700 border-orange-200': obtenerTipoCita(cita.tipo_mercancia) === 'secos',
-                                            'bg-lime-50 text-lime-700 border-lime-200': obtenerTipoCita(cita.tipo_mercancia) === 'fruver',
-                                            'bg-rose-50 text-rose-700 border-rose-200': obtenerTipoCita(cita.tipo_mercancia) === 'perecederos'
-                                        }">
-                                        {{ obtenerTipoCita(cita.tipo_mercancia) }}
-                                    </span>
-                                </div>
-                                <p class="text-sm font-semibold text-[#6c7263] truncate">{{ cita.proveedor }}</p>
-                                
-                                <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-2 text-xs text-[#888c80]">
-                                    <span class="flex items-center gap-1.5">🕒 {{ formatRangoHora(cita.fecha_cita, cita.duracion_minutos || 0) }}</span>
-                                    <span class="flex items-center gap-1.5">🚛 {{ getSucursalNombre(cita.muelle_asignado) }}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Acciones -->
-                        <div class="flex items-center gap-2 shrink-0">
-                            <!-- Admin/Receptor Actions -->
-                            <template v-if="$page.props.auth.user.role !== 'proveedor'">
-                                <button v-if="cita.estatus === 'programada'" @click="abrirModalFinalizar(cita)"
-                                    class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md transition-all">
-                                    Completar
-                                </button>
-                                <button @click="abrirModalReprogramar(cita)"
-                                    class="border border-[#eef0eb] hover:bg-[#fcfbf8] text-[#1c1c1c] px-4 py-2 rounded-xl text-xs font-bold transition-all">
-                                    Reprogramar
-                                </button>
-                                <button @click="numeroOrden = cita.numero_oc; buscarOrden()"
-                                    class="bg-[#1c1c1c] hover:bg-zinc-800 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md">
-                                    Ver Detalle
-                                </button>
-                            </template>
-                            
-                            <!-- Proveedor Actions -->
-                            <template v-else-if="cita.estatus === 'programada'">
-                                <button @click="iniciarReprogramacion(cita)"
-                                    class="border border-[#eef0eb] hover:bg-[#fcfbf8] text-orange-600 px-4 py-2 rounded-xl text-xs font-bold transition-all">
-                                    Reprogramar
-                                </button>
-                                <button @click="abrirModalCancelar(cita)"
-                                    class="border border-[#eef0eb] hover:bg-rose-50 text-rose-600 px-4 py-2 rounded-xl text-xs font-bold transition-all">
-                                    Cancelar
-                                </button>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-
-                <div v-else class="px-6 py-16 text-center text-[#888c80]">
-                    <div class="text-3xl mb-2">📭</div>
-                    <p class="text-sm font-medium">No hay citas registradas</p>
-                    <p class="text-xs mt-0.5">Las programaciones vigentes aparecerán listadas aquí.</p>
-                </div>
-            </div>
-
-            <!-- DETALLE COMPLETO DE ORDEN ACTIVA -->
-            <div v-if="datosOrden && $page.props.auth.user.role !== 'proveedor'" class="space-y-6 animate-scale-in">
-                <div class="bg-white border border-[#eef0eb] rounded-2xl shadow-sm overflow-hidden">
-                    <div class="bg-[#1c1c1c] p-6 text-white flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                <!-- PANEL DE CITAS AGENDADAS (siempre visible) -->
+                <div class="bg-white overflow-hidden shadow-xl shadow-slate-200/50 sm:rounded-3xl border border-slate-100 mb-8">
+                    <div class="bg-slate-900 px-8 py-5 flex items-center justify-between">
                         <div>
-                            <span class="bg-primary/20 text-primary text-[9px] font-black px-2 py-0.5 rounded border border-primary/30 uppercase tracking-wider mb-2.5 inline-block">Proveedor Seleccionado</span>
-                            <h3 class="text-2xl font-bold leading-tight">{{ datosOrden.Nombre_Proveedor }}</h3>
-                            <p class="text-xs text-[#888c80] mt-1 font-mono">RIF: {{ datosOrden.Codigo_Proveedor }}</p>
-                        </div>
-                        <div class="sm:text-right">
-                            <p class="text-[#888c80] text-[10px] font-bold uppercase tracking-wider">Orden Compra</p>
-                            <p class="text-xl font-bold font-mono text-primary mt-1">{{ datosOrden.Numero_OC }}</p>
-                            <span v-if="datosExtra" :class="statusColor(datosExtra.status_orden)" class="inline-block mt-2 text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase">
-                                {{ datosExtra.status_texto }}
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- Datos Principales Grid -->
-                    <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <!-- Col 1: Contacto -->
-                        <div class="space-y-4">
-                            <h4 class="text-xs font-bold text-[#1c1c1c] uppercase tracking-wider border-b border-[#eef0eb] pb-2">Contacto & Datos</h4>
-                            <div>
-                                <p class="text-[10px] font-bold text-[#888c80] uppercase">Teléfono</p>
-                                <p class="text-sm font-semibold text-[#1c1c1c] mt-0.5">{{ datosOrden.Telefono_Proveedor || 'No registrado' }}</p>
-                            </div>
-                            <div>
-                                <p class="text-[10px] font-bold text-[#888c80] uppercase">Comprador Asignado</p>
-                                <p class="text-sm font-semibold text-[#1c1c1c] mt-0.5">{{ datosOrden.Comprador_Interno || 'General' }}</p>
-                            </div>
-                            <div v-if="datosExtra">
-                                <p class="text-[10px] font-bold text-[#888c80] uppercase">Factura Asociada</p>
-                                <div class="flex items-center gap-2 mt-1">
-                                    <p class="text-sm font-bold font-mono text-[#1c1c1c]">{{ datosExtra.factura || 'Por facturar' }}</p>
-                                    <a v-if="datosExtra.factura_url" :href="datosExtra.factura_url" target="_blank"
-                                        class="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors">
-                                        Ver PDF
+                            <div class="flex items-center gap-3">
+                                <h3 class="text-white font-bold text-base">
+                                    <span v-if="$page.props.auth.user.role === 'proveedor'">
+                                        <span v-if="$page.props.auth.user.es_galpon || $page.props.auth.user.username === 'GALPON.ALFONSO'">📦 Mis Traslados Internos Agendados</span>
+                                        <span v-else>🚚 Mis Citas Agendadas</span>
+                                    </span>
+                                    <span v-else>📋 Citas Agendadas</span>
+                                </h3>
+                                <div v-if="$page.props.auth.user.role === 'proveedor'" class="flex flex-wrap items-center gap-2 ml-4">
+                                    <a href="/Manual_Usuario_Portal_Proveedor_CITSUR.pdf" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-700 shadow-sm" title="Abrir y Descargar Manual Oficial en PDF">
+                                        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                        <span>Manual PDF</span>
+                                    </a>
+                                    <button @click="mostrarModalVideo = true" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shadow-blue-500/20" title="Ver Video Tutorial de Agendamiento">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        <span>Video Tutorial</span>
+                                    </button>
+                                    <a href="/reservar-cita" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg shadow-red-500/30 transition-all flex items-center gap-1">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                                        {{ ($page.props.auth.user.es_galpon || $page.props.auth.user.username === 'GALPON.ALFONSO') ? 'AGENDAR TRASLADO INTERNO' : 'AGENDAR NUEVA CITA' }}
                                     </a>
                                 </div>
                             </div>
+                            <p class="text-slate-400 text-xs mt-0.5">Recepciones activas y programadas</p>
                         </div>
-
-                        <!-- Col 2: Tipo de Transporte -->
-                        <div class="space-y-4">
-                            <h4 class="text-xs font-bold text-[#1c1c1c] uppercase tracking-wider border-b border-[#eef0eb] pb-2">Transporte & Mercancía</h4>
-                            <div v-if="datosExtra && datosExtra.tipo_vehiculo" class="p-3.5 rounded-xl border" :class="getVehiculoNombre(datosExtra.tipo_vehiculo).frio ? 'bg-cyan-50 border-cyan-100' : 'bg-zinc-50 border-[#eef0eb]'">
-                                <p class="text-[9px] font-bold uppercase tracking-wider flex items-center gap-1.5" :class="getVehiculoNombre(datosExtra.tipo_vehiculo).frio ? 'text-cyan-600' : 'text-[#6c7263]'">
-                                    🛞 Tipo Vehículo
-                                </p>
-                                <p class="text-sm font-bold text-[#1c1c1c] mt-1">{{ getVehiculoNombre(datosExtra.tipo_vehiculo).nombre }}</p>
-                                <p class="text-[10px] text-[#6c7263] mt-0.5">Capacidad: {{ getVehiculoNombre(datosExtra.tipo_vehiculo).cap }}</p>
-                                <span v-if="getVehiculoNombre(datosExtra.tipo_vehiculo).frio" class="mt-2 inline-block text-[9px] font-black bg-cyan-600 text-white px-2 py-0.5 rounded-full uppercase">❄️ Cadena de Frío</span>
-                            </div>
-                            <div class="flex items-center gap-3">
-                                <div class="h-10 w-10 bg-[#f5f6f2] rounded-xl flex items-center justify-center font-bold text-primary border border-[#eef0eb] shrink-0">{{ datosOrden.Total_SKUs }}</div>
-                                <div>
-                                    <p class="text-xs font-bold text-[#1c1c1c] uppercase">Variedad SKUs</p>
-                                    <button @click="abrirModalSKU" class="text-[10px] text-primary hover:underline font-bold mt-0.5">Ver lista completa</button>
-                                </div>
-                            </div>
+                        <div class="flex items-center gap-2">
+                            <span class="bg-white/10 text-white text-xs font-bold px-3 py-1 rounded-full">
+                                {{ pestanaCitas === 'activas' ? countActivas : countFinalizadas }} cita{{ (pestanaCitas === 'activas' ? countActivas : countFinalizadas) !== 1 ? 's' : '' }}
+                            </span>
+                            <button @click="cargarCitas" class="text-slate-400 hover:text-white transition-colors p-1" title="Actualizar">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            </button>
                         </div>
+                    </div>
+                    
+                    <!-- Tabs de Filtro de Citas -->
+                    <div class="flex border-b border-slate-100 bg-slate-50 px-8 py-2 gap-4">
+                        <button @click="cambiarPestanaCitas('activas')" 
+                            class="text-xs font-bold uppercase tracking-wider py-2 border-b-2 transition-all font-mono flex items-center gap-1.5"
+                            :class="pestanaCitas === 'activas' ? 'border-red-600 text-red-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
+                            <span>Activas</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px]" :class="pestanaCitas === 'activas' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-600'">
+                                {{ countActivas }}
+                            </span>
+                        </button>
+                        <button @click="cambiarPestanaCitas('finalizadas')" 
+                            class="text-xs font-bold uppercase tracking-wider py-2 border-b-2 transition-all font-mono flex items-center gap-1.5"
+                            :class="pestanaCitas === 'finalizadas' ? 'border-red-600 text-red-600 font-extrabold' : 'border-transparent text-slate-400 hover:text-slate-600'">
+                            <span>Finalizadas (Historial)</span>
+                            <span class="px-2 py-0.5 rounded-full text-[10px]" :class="pestanaCitas === 'finalizadas' ? 'bg-red-100 text-red-700' : 'bg-slate-200 text-slate-600'">
+                                {{ countFinalizadas }}
+                            </span>
+                        </button>
+                    </div>
 
-                        <!-- Col 3: Ciclos y Destino -->
-                        <div class="space-y-4">
-                            <h4 class="text-xs font-bold text-[#1c1c1c] uppercase tracking-wider border-b border-[#eef0eb] pb-2">Destino Sugerido</h4>
-                            <div class="bg-[#fcfbf8] rounded-2xl p-4 border border-[#eef0eb] flex justify-around items-center">
-                                <div class="text-center">
-                                    <span class="text-[9px] font-bold text-[#888c80] uppercase">Viajes Estimados</span>
-                                    <p class="text-3xl font-extrabold text-[#1c1c1c] mt-1">{{ Math.round(datosOrden.Ciclos_Necesarios) }}</p>
+                    <!-- Filtro de Categorías (Secos, Fruver, Perecederos) para Administración y Recepción -->
+                    <div v-if="$page.props.auth.user.role !== 'proveedor'" class="flex flex-wrap items-center gap-2 bg-slate-50 px-8 py-3 border-b border-slate-100">
+                        <span class="text-[11px] font-black text-slate-400 uppercase tracking-wider mr-2">Filtrar por:</span>
+                        
+                        <button @click="filtroTipoMercancia = 'todos'"
+                            class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
+                            :class="filtroTipoMercancia === 'todos' ? 'bg-slate-950 text-white border-slate-950 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                            Todos
+                        </button>
+                        
+                        <button @click="filtroTipoMercancia = 'secos'"
+                            class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
+                            :class="filtroTipoMercancia === 'secos' ? 'bg-orange-600 text-white border-orange-600 shadow-sm shadow-orange-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-200'">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path></svg>
+                            Secos
+                        </button>
+                        
+                        <button @click="filtroTipoMercancia = 'fruver'"
+                            class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
+                            :class="filtroTipoMercancia === 'fruver' ? 'bg-lime-600 text-white border-lime-600 shadow-sm shadow-lime-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-lime-50 hover:text-lime-700 hover:border-lime-200'">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 3c-1.2 0-2.4.4-3.4 1.2A8 8 0 004 11c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8zm0 16V9"></path></svg>
+                            Fruver
+                        </button>
+                        
+                        <button @click="filtroTipoMercancia = 'perecederos'"
+                            class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all border"
+                            :class="filtroTipoMercancia === 'perecederos' ? 'bg-rose-600 text-white border-rose-600 shadow-sm shadow-rose-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v18m9-9H3m15.364-6.364L5.636 18.364m12.728 0L5.636 5.636"></path></svg>
+                            Perecederos
+                        </button>
+                    </div>
+
+                    <!-- Lista de citas -->
+                    <div v-if="citasFiltradas.length > 0" class="divide-y divide-slate-100">
+                        <div v-for="cita in citasFiltradas" :key="cita.id"
+                            class="px-4 sm:px-8 py-5 flex flex-col md:flex-row items-start md:items-center justify-between hover:bg-slate-50/70 transition-colors group gap-4 md:gap-0">
+                            <div class="flex items-start sm:items-center gap-4 sm:gap-5 w-full md:w-auto">
+                                <!-- Bloque Fecha grande -->
+                                <div class="w-16 h-16 flex-shrink-0 bg-red-50 rounded-2xl flex flex-col items-center justify-center border border-red-100">
+                                    <span class="text-[10px] font-bold text-red-400 uppercase">{{ new Date(cita.fecha_cita).toLocaleDateString('es-VE', { month: 'short' }) }}</span>
+                                    <span class="text-2xl font-black text-red-600 -mt-0.5">{{ new Date(cita.fecha_cita).getDate() }}</span>
                                 </div>
-                                <div class="h-8 w-[1px] bg-[#eef0eb]"></div>
-                                <div class="text-center">
-                                    <span class="text-[9px] font-bold text-[#888c80] uppercase">Sucursal</span>
-                                    <p class="text-sm font-bold text-primary mt-2 truncate max-w-[100px]">{{ getSucursalNombre(datosOrden.Muelle_Destino) }}</p>
+
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center gap-2 mb-1">
+                                        <p class="font-black text-slate-800 font-mono text-base truncate">{{ cita.numero_oc }}</p>
+                                        <span :class="citaStatusColor(cita.estatus)" class="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">{{ cita.estatus }}</span>
+                                        <span v-if="esCitaTraslado(cita)" class="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                                            📦 Traslado Interno
+                                        </span>
+                                        <span v-if="cita.galpon_origen" class="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                            Origen: {{ cita.galpon_origen }}
+                                        </span>
+                                        <span v-if="cita.tipo_mercancia && !esCitaTraslado(cita)" class="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border"
+                                            :class="{
+                                                'bg-orange-50 text-orange-700 border-orange-200': obtenerTipoCita(cita.tipo_mercancia) === 'secos',
+                                                'bg-lime-50 text-lime-700 border-lime-200': obtenerTipoCita(cita.tipo_mercancia) === 'fruver',
+                                                'bg-rose-50 text-rose-700 border-rose-200': obtenerTipoCita(cita.tipo_mercancia) === 'perecederos'
+                                            }">
+                                            {{ obtenerTipoCita(cita.tipo_mercancia) }}
+                                        </span>
+                                    </div>
+                                    <p class="text-sm text-slate-600 font-semibold truncate">{{ cita.proveedor }}</p>
+                                    <div class="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-400">
+                                        <span class="flex items-center gap-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                            {{ formatRangoHora(cita.fecha_cita, cita.duracion_minutos || 0) }}
+                                        </span>
+                                        <span class="flex items-center gap-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                            {{ new Date(cita.fecha_cita).toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) }}
+                                        </span>
+                                        <span class="flex items-center gap-1">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+                                            Sucursal {{ getSucursalNombre(cita.muelle_asignado) }}
+                                        </span>
+                                    </div>
+                                    <div class="mt-2 flex flex-wrap items-center gap-2 sm:gap-4">
+                                        <div v-if="cita.vendedor_nombre" class="bg-slate-100 px-3 py-1.5 rounded-lg inline-block">
+                                            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Vendedor</p>
+                                            <p class="text-xs font-bold text-slate-800">{{ cita.vendedor_nombre }} <span v-if="cita.vendedor_telefono" class="font-normal text-slate-500">| {{ cita.vendedor_telefono }}</span></p>
+                                        </div>
+                                        <div v-if="cita.registrado_por_nombre" class="bg-blue-50 px-3 py-1.5 rounded-lg inline-block border border-blue-100">
+                                            <p class="text-[10px] text-blue-500 font-bold uppercase tracking-widest">Atendido por</p>
+                                            <p class="text-xs font-bold text-blue-800">{{ cita.registrado_por_nombre }}</p>
+                                        </div>
+                                        <div v-if="cita.fecha_envio_comprador || cita.fecha_emision || cita.fecha_odc" class="bg-indigo-50 px-3 py-1.5 rounded-lg inline-block border border-indigo-100" title="Fecha y hora en que el comprador envió/habilitó la orden">
+                                            <p class="text-[10px] text-indigo-600 font-bold uppercase tracking-widest flex items-center gap-1">
+                                                <span>📤</span> Envío Comprador
+                                            </p>
+                                            <p class="text-xs font-bold text-indigo-900">{{ formatFechaHora(cita.fecha_envio_comprador || cita.fecha_emision || cita.fecha_odc) }}</p>
+                                        </div>
+                                        <div v-if="cita.fecha_registro_cita || cita.created_at" class="bg-purple-50 px-3 py-1.5 rounded-lg inline-block border border-purple-100" title="Fecha y hora en que el proveedor registró la cita en el sistema">
+                                            <p class="text-[10px] text-purple-600 font-bold uppercase tracking-widest flex items-center gap-1">
+                                                <span>⏱️</span> Registro Cita
+                                            </p>
+                                            <p class="text-xs font-bold text-purple-900">{{ formatFechaHora(cita.fecha_registro_cita || cita.created_at) }}</p>
+                                        </div>
+                                        <div v-if="cita.estatus === 'finalizada'" class="bg-emerald-50 px-3 py-1.5 rounded-lg inline-block border border-emerald-200" title="Fecha y hora en que la recepción fue completada en el muelle">
+                                            <p class="text-[10px] text-emerald-700 font-bold uppercase tracking-widest flex items-center gap-1">
+                                                <span>✅</span> Completada
+                                            </p>
+                                            <p class="text-xs font-bold text-emerald-950">
+                                                {{ formatFechaHora(cita.fecha_completada || cita.updated_at) }}
+                                                <span v-if="cita.completada_por_nombre" class="font-normal text-emerald-700">· por {{ cita.completada_por_nombre }}</span>
+                                            </p>
+                                        </div>
+                                        <div v-else-if="cita.estatus === 'programada'" class="bg-amber-50 px-3 py-1.5 rounded-lg inline-block border border-amber-200" title="Recepción aún no completada en el muelle">
+                                            <p class="text-[10px] text-amber-700 font-bold uppercase tracking-widest flex items-center gap-1">
+                                                <span>⏳</span> Recepción
+                                            </p>
+                                            <p class="text-xs font-bold text-amber-900">Pendiente por recibir</p>
+                                        </div>
+                                        <div v-else-if="cita.estatus === 'en muelle'" class="bg-blue-50 px-3 py-1.5 rounded-lg inline-block border border-blue-200" title="Vehículo actualmente en muelle">
+                                            <p class="text-[10px] text-blue-700 font-bold uppercase tracking-widest flex items-center gap-1">
+                                                <span>🚚</span> Recepción
+                                            </p>
+                                            <p class="text-xs font-bold text-blue-900">Descargando en muelle</p>
+                                        </div>
+                                        <div v-if="cita.numero_factura" class="bg-emerald-50 px-3 py-1.5 rounded-lg flex items-center gap-3 border border-emerald-100">
+                                            <div>
+                                                <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Factura Proveedor</p>
+                                                <p class="text-xs font-bold text-emerald-900 font-mono">{{ cita.numero_factura }}</p>
+                                            </div>
+                                            <div class="flex items-center gap-2">
+                                                <a v-if="cita.factura_url" :href="cita.factura_url" target="_blank"
+                                                    class="bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm text-[10px] font-bold flex items-center gap-1.5" title="Ver / Descargar Factura">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                    Ver Factura
+                                                </a>
+                                                <span v-else class="text-[10px] text-emerald-500 italic">Sin archivo</span>
+                                            </div>
+                                        </div>
+                                        <div v-if="cita.tipo_vehiculo && $page.props.auth.user.role !== 'proveedor'" class="px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border" :class="getVehiculoNombre(cita.tipo_vehiculo).frio ? 'bg-cyan-50 border-cyan-200' : 'bg-violet-50 border-violet-100'">
+                                            <svg class="w-4 h-4 flex-shrink-0" :class="getVehiculoNombre(cita.tipo_vehiculo).frio ? 'text-cyan-600' : 'text-violet-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                                            <div>
+                                                <p class="text-[10px] font-bold uppercase tracking-widest" :class="getVehiculoNombre(cita.tipo_vehiculo).frio ? 'text-cyan-600' : 'text-violet-500'">Vehículo</p>
+                                                <p class="text-xs font-bold" :class="getVehiculoNombre(cita.tipo_vehiculo).frio ? 'text-cyan-900' : 'text-violet-800'">
+                                                    {{ getVehiculoNombre(cita.tipo_vehiculo).nombre }}
+                                                    <span class="font-normal text-slate-500">| {{ getVehiculoNombre(cita.tipo_vehiculo).cap }}</span>
+                                                </p>
+                                            </div>
+                                            <span v-if="getVehiculoNombre(cita.tipo_vehiculo).frio" class="text-[9px] font-black bg-cyan-600 text-white px-2 py-0.5 rounded-full uppercase whitespace-nowrap">❄️ Thermo</span>
+                                        </div>
+                                    </div>
                                 </div>
+                            </div>
+                            <div v-if="$page.props.auth.user.role !== 'proveedor'" class="flex flex-wrap sm:flex-nowrap gap-2 w-full md:w-auto mt-4 md:mt-0">
+                                <button v-if="cita.estatus === 'programada' && ['admin', 'receptor'].includes($page.props.auth.user.role)" @click="abrirModalFinalizar(cita)"
+                                    class="w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+                                    Completar
+                                </button>
+                                <button @click="abrirModalReprogramar(cita)"
+                                    class="w-full sm:w-auto justify-center bg-slate-200 text-slate-700 px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-slate-300 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    Reprogramar
+                                </button>
+                                <button @click="numeroOrden = cita.numero_oc; buscarOrden()"
+                                    class="w-full sm:w-auto justify-center bg-red-600 text-white px-5 py-3 md:py-2.5 rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    Ver Detalle
+                                </button>
+                            </div>
+                            <div v-if="$page.props.auth.user.role === 'proveedor' && cita.estatus === 'programada'" class="flex flex-wrap sm:flex-nowrap gap-2 w-full md:w-auto mt-4 md:mt-0">
+                                <template v-if="!esCitaTraslado(cita)">
+                                    <button v-if="cita.numero_factura" @click="anularFactura(cita)"
+                                        class="w-full sm:w-auto justify-center bg-red-100 text-red-700 border border-red-200 px-4 py-2 md:py-2.5 rounded-xl text-[11px] font-bold hover:bg-red-200 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1" :disabled="procesandoFactura">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                        Anular Factura
+                                    </button>
+                                    <button v-if="!cita.numero_factura" @click="abrirModalSubirFactura(cita)"
+                                        class="w-full sm:w-auto justify-center bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 md:py-2.5 rounded-xl text-[11px] font-bold hover:bg-emerald-200 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                        Cargar Factura
+                                    </button>
+                                </template>
+                                <span v-else class="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-3 py-2 rounded-xl flex items-center gap-1">
+                                    🔄 Traslado Interno
+                                </span>
+                                <button @click="iniciarReprogramacion(cita)"
+                                    class="w-full sm:w-auto justify-center bg-orange-50 text-orange-600 border border-orange-200 px-4 py-2 md:py-2.5 rounded-xl text-[11px] font-bold hover:bg-orange-100 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                    Reprogramar
+                                </button>
+                                <button @click="abrirModalCancelar(cita)"
+                                    class="w-full sm:w-auto justify-center bg-red-50 text-red-600 border border-red-200 px-4 py-2 md:py-2.5 rounded-xl text-[11px] font-bold hover:bg-red-100 transition-all opacity-100 md:opacity-70 group-hover:opacity-100 flex items-center gap-1">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    Cancelar Cita
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Tiempo Óptimo Recalculador Widget -->
-                    <div v-if="tiempoOptimo" class="mx-6 mb-6 bg-[#f5f6f2] rounded-2xl p-5 border border-[#eef0eb]">
-                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                            <div>
-                                <span class="text-[9px] font-bold text-[#888c80] uppercase">Cálculo Optimizado de Tiempos</span>
-                                <p class="text-2xl font-black text-[#1c1c1c] mt-1">
-                                    {{ formatMinutos(tiempoOptimo.tiempo_optimo_minutos) }}
-                                    <span class="text-xs text-[#6c7263] font-medium ml-2">con {{ tiempoOptimo.operarios_usados }} equipos de trabajo</span>
-                                </p>
-                                <p class="text-[11px] text-[#888c80] mt-0.5">Tiempo base estimado sin optimizar: {{ formatMinutos(tiempoOptimo.tiempo_base_minutos) }}</p>
+                    <!-- Sin citas -->
+                    <div v-else class="px-8 py-12 text-center">
+                        <div class="text-4xl mb-3">📭</div>
+                        <p class="text-slate-400 font-semibold">
+                            {{ pestanaCitas === 'activas' ? 'No hay citas activas agendadas' : 'No hay citas finalizadas en el historial' }}
+                        </p>
+                        <div v-if="pestanaCitas === 'activas' && countFinalizadas > 0" class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-2xl max-w-md mx-auto text-left shadow-sm">
+                            <div class="flex items-start gap-3">
+                                <span class="text-xl">✅</span>
+                                <div>
+                                    <p class="text-blue-900 text-xs font-bold">
+                                        Su cita anterior ya fue recibida y completada en el muelle
+                                    </p>
+                                    <p class="text-blue-700 text-[11px] mt-0.5">
+                                        Las citas recibidas se trasladan automáticamente a la pestaña de historial.
+                                    </p>
+                                    <button @click="cambiarPestanaCitas('finalizadas')" class="mt-2.5 inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-all shadow-sm">
+                                        <span>Ver {{ countFinalizadas }} cita{{ countFinalizadas !== 1 ? 's' : '' }} en Historial</span>
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                    </button>
+                                </div>
                             </div>
-                            <div class="flex items-center gap-4 bg-white p-3 rounded-xl border border-[#eef0eb]">
-                                <div class="text-center">
-                                    <span class="text-[9px] font-bold text-[#888c80] uppercase">Ajustar Equipos</span>
-                                    <div class="flex items-center gap-2 mt-1.5">
-                                        <button @click="operariosSeleccionados = Math.max(1, operariosSeleccionados - 1); recalcularTiempo()"
-                                            class="w-7 h-7 bg-[#f5f6f2] rounded-lg flex items-center justify-center hover:bg-primary hover:text-white transition-colors font-bold text-xs">">−</button>
-                                        <span class="text-base font-extrabold w-6 text-center">{{ operariosSeleccionados }}</span>
-                                        <button @click="operariosSeleccionados++; recalcularTiempo()"
-                                            class="w-7 h-7 bg-[#f5f6f2] rounded-lg flex items-center justify-center hover:bg-primary hover:text-white transition-colors font-bold text-xs">+</button>
+                        </div>
+                        <p v-else class="text-slate-300 text-sm mt-1">Las recepciones aparecerán aquí cuando un proveedor reserve una cita</p>
+                    </div>
+                </div>
+
+                <!-- INFO PRINCIPAL -->
+                <div v-if="datosOrden && $page.props.auth.user.role !== 'proveedor'" class="space-y-6">
+                    <div class="bg-white overflow-hidden shadow-xl shadow-slate-200/50 sm:rounded-3xl border border-slate-100">
+                        <!-- Header proveedor -->
+                        <div class="bg-slate-900 p-8 text-white flex justify-between items-start">
+                            <div>
+                                <span class="bg-red-600 text-[10px] font-black px-2 py-1 rounded uppercase tracking-tighter mb-2 inline-block">Proveedor Verificado</span>
+                                <h3 class="text-3xl font-black">{{ datosOrden.Nombre_Proveedor }}</h3>
+                                <p class="text-slate-400 font-medium mt-1">RIF: {{ datosOrden.Codigo_Proveedor }}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-slate-400 text-sm font-bold uppercase tracking-widest">Documento</p>
+                                <p class="text-2xl font-mono font-bold text-red-500">{{ datosOrden.Numero_OC }}</p>
+                                <span v-if="datosExtra" :class="statusColor(datosExtra.status_orden)"
+                                    class="inline-block mt-2 text-[10px] font-black px-2.5 py-1 rounded-full uppercase">
+                                    {{ datosExtra.status_texto }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Datos principales -->
+                        <div class="p-8 grid grid-cols-1 md:grid-cols-4 gap-8">
+                            <!-- Contacto + Factura -->
+                            <div class="space-y-4">
+                                <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Información de Contacto</h4>
+                                <div>
+                                    <p class="text-xs text-slate-500 font-bold">Teléfono Principal</p>
+                                    <p class="text-slate-800 font-bold">{{ datosOrden.Telefono_Proveedor || 'No registrado' }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-xs text-slate-500 font-bold">Comprador Asignado</p>
+                                    <p class="text-slate-800 font-bold">{{ datosOrden.Comprador_Interno || 'General' }}</p>
+                                </div>
+                                <div v-if="datosExtra">
+                                    <p class="text-xs text-slate-500 font-bold">Factura Proveedor</p>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <p class="text-slate-800 font-bold font-mono">{{ datosExtra.factura || 'Por facturar' }}</p>
+                                        <a v-if="datosExtra.factura_url" :href="datosExtra.factura_url" target="_blank"
+                                            class="bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded transition-all text-[10px] font-bold flex items-center gap-1 shadow-sm">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                            Ver Factura
+                                        </a>
+                                    </div>
+                                </div>
+                                <div v-if="datosExtra && datosExtra.tipo_vehiculo" class="p-3 rounded-xl border mt-2" :class="getVehiculoNombre(datosExtra.tipo_vehiculo).frio ? 'bg-cyan-50 border-cyan-200' : 'bg-violet-50 border-violet-200'">
+                                    <p class="text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-1.5" :class="getVehiculoNombre(datosExtra.tipo_vehiculo).frio ? 'text-cyan-600' : 'text-violet-500'">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                                        Vehículo del Transporte
+                                    </p>
+                                    <p class="text-sm font-black" :class="getVehiculoNombre(datosExtra.tipo_vehiculo).frio ? 'text-cyan-900' : 'text-violet-900'">{{ getVehiculoNombre(datosExtra.tipo_vehiculo).nombre }}</p>
+                                    <p class="text-[10px] text-slate-500 font-bold mt-0.5">Capacidad: {{ getVehiculoNombre(datosExtra.tipo_vehiculo).cap }}</p>
+                                    <span v-if="getVehiculoNombre(datosExtra.tipo_vehiculo).frio" class="mt-1.5 inline-flex items-center gap-1 text-[9px] font-black bg-cyan-600 text-white px-2.5 py-1 rounded-full uppercase">❄️ Thermo King / Cadena de Frío</span>
+                                </div>
+                                <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mt-4">
+                                    <p class="text-[10px] text-yellow-800 font-black uppercase tracking-widest mb-1 flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        Observación ERP
+                                    </p>
+                                    <p class="text-xs text-yellow-900 font-medium italic">
+                                        {{ datosOrden.Observacion && datosOrden.Observacion.trim() !== '' && datosOrden.Observacion !== 'Ninguna' ? datosOrden.Observacion : 'Sin observaciones en el ERP.' }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Mercancía + Fechas -->
+                            <div class="space-y-4">
+
+                                <h4 class="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Detalle de Mercancía</h4>
+                                <div class="flex items-center gap-3 cursor-pointer group hover:bg-slate-50 -mx-2 px-2 py-1 rounded-xl transition-all" @click="abrirModalSKU">
+                                    <div class="h-10 w-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600 font-bold group-hover:bg-red-100 group-hover:text-red-600 transition-colors">{{ datosOrden.Total_SKUs }}</div>
+                                    <div>
+                                        <p class="text-sm text-slate-600 font-bold uppercase">Variedad de Productos</p>
+                                        <p class="text-[10px] text-red-500 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">Clic para ver detalle →</p>
+                                    </div>
+                                </div>
+                                <div v-if="datosOrden.Total_Cajas_Fisicas > 0" class="flex items-center gap-3">
+                                    <div class="h-10 w-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-700 font-bold">{{ Math.round(datosOrden.Total_Cajas_Fisicas) }}</div>
+                                    <p class="text-sm text-slate-600 font-bold uppercase">Cajas (Secos)</p>
+                                </div>
+                                <div v-if="datosOrden.Total_KG_Carnes > 0 || datosOrden.Total_UND_Carnes > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-rose-50 rounded-lg flex flex-col items-center justify-center text-rose-700 font-bold border border-rose-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Carnes > 0 ? Math.round(datosOrden.Total_KG_Carnes) : Math.round(datosOrden.Total_UND_Carnes) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Carnes > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Carnes / Aves</p>
+                                </div>
+
+                                <div v-if="datosOrden.Total_KG_Charcuteria > 0 || datosOrden.Total_UND_Charcuteria > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-amber-50 rounded-lg flex flex-col items-center justify-center text-amber-700 font-bold border border-amber-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Charcuteria > 0 ? Math.round(datosOrden.Total_KG_Charcuteria) : Math.round(datosOrden.Total_UND_Charcuteria) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Charcuteria > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Charcutería / Lácteos</p>
+                                </div>
+
+                                <div v-if="datosOrden.Total_KG_Pescaderia > 0 || datosOrden.Total_UND_Pescaderia > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-blue-50 rounded-lg flex flex-col items-center justify-center text-blue-700 font-bold border border-blue-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Pescaderia > 0 ? Math.round(datosOrden.Total_KG_Pescaderia) : Math.round(datosOrden.Total_UND_Pescaderia) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Pescaderia > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Pescadería</p>
+                                </div>
+
+                                <div v-if="datosOrden.Total_KG_Congelados > 0 || datosOrden.Total_UND_Congelados > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-cyan-50 rounded-lg flex flex-col items-center justify-center text-cyan-700 font-bold border border-cyan-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Congelados > 0 ? Math.round(datosOrden.Total_KG_Congelados) : Math.round(datosOrden.Total_UND_Congelados) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Congelados > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Congelados</p>
+                                </div>
+                                <div v-if="datosOrden.Total_KG_Hortalizas > 0 || datosOrden.Total_UND_Hortalizas > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-lime-50 rounded-lg flex flex-col items-center justify-center text-lime-700 font-bold border border-lime-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Hortalizas > 0 ? Math.round(datosOrden.Total_KG_Hortalizas) : Math.round(datosOrden.Total_UND_Hortalizas) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Hortalizas > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Hortalizas</p>
+                                </div>
+
+                                <div v-if="datosOrden.Total_KG_Frutas > 0 || datosOrden.Total_UND_Frutas > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-orange-50 rounded-lg flex flex-col items-center justify-center text-orange-700 font-bold border border-orange-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Frutas > 0 ? Math.round(datosOrden.Total_KG_Frutas) : Math.round(datosOrden.Total_UND_Frutas) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Frutas > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Frutas</p>
+                                </div>
+
+                                <div v-if="datosOrden.Total_KG_Verduras > 0 || datosOrden.Total_UND_Verduras > 0" class="flex items-center gap-3 group/item">
+                                    <div class="h-10 w-10 bg-emerald-50 rounded-lg flex flex-col items-center justify-center text-emerald-700 font-bold border border-emerald-100">
+                                        <span class="text-[10px] leading-tight">{{ datosOrden.Total_KG_Verduras > 0 ? Math.round(datosOrden.Total_KG_Verduras) : Math.round(datosOrden.Total_UND_Verduras) }}</span>
+                                        <span class="text-[8px] uppercase">{{ datosOrden.Total_KG_Verduras > 0 ? 'KG' : 'UND' }}</span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 font-bold uppercase leading-tight">Verduras</p>
+                                </div>
+                                <button @click="abrirModalSKU"
+                                    class="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-600 transition-all duration-300 shadow-md hover:shadow-lg active:scale-95">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
+                                    Ver detalle Productos
+                                </button>
+                            </div>
+
+                            <!-- Ciclos y Muelle -->
+                            <div class="md:col-span-2 space-y-4">
+                                <!-- Fechas -->
+                                <div v-if="datosExtra" class="bg-blue-50 rounded-2xl p-4 border border-blue-100 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+                                    <div>
+                                        <p class="text-[10px] text-blue-500 font-black uppercase">Fecha Orden</p>
+                                        <p class="text-sm font-bold text-blue-800">{{ formatFecha(datosExtra.fecha_orden) }}</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-[10px] text-blue-500 font-black uppercase">Fecha Recepción</p>
+                                        <p class="text-sm font-bold text-blue-800">{{ formatFecha(datosExtra.fecha_recepcion) }}</p>
+                                    </div>
+                                    <div v-if="datosExtra.fecha_envio_comprador">
+                                        <p class="text-[10px] text-indigo-600 font-black uppercase flex items-center gap-1">
+                                            <span>📤</span> Envío Comprador
+                                        </p>
+                                        <p class="text-sm font-bold text-indigo-900">{{ formatFechaHora(datosExtra.fecha_envio_comprador) }}</p>
+                                    </div>
+                                    <div v-if="datosExtra.fecha_registro_cita">
+                                        <p class="text-[10px] text-purple-600 font-black uppercase flex items-center gap-1">
+                                            <span>⏱️</span> Registro Cita
+                                        </p>
+                                        <p class="text-sm font-bold text-purple-900">{{ formatFechaHora(datosExtra.fecha_registro_cita) }}</p>
+                                    </div>
+                                    <div v-if="datosExtra.fecha_completada" class="bg-emerald-100/60 p-2 rounded-xl border border-emerald-200">
+                                        <p class="text-[10px] text-emerald-700 font-black uppercase flex items-center gap-1">
+                                            <span>✅</span> Completada
+                                        </p>
+                                        <p class="text-xs font-bold text-emerald-950">
+                                            {{ formatFechaHora(datosExtra.fecha_completada) }}
+                                            <span v-if="datosExtra.completada_por_nombre" class="block font-normal text-[10px] text-emerald-700">por {{ datosExtra.completada_por_nombre }}</span>
+                                        </p>
+                                    </div>
+                                    <div v-else class="bg-amber-100/60 p-2 rounded-xl border border-amber-200">
+                                        <p class="text-[10px] text-amber-700 font-black uppercase flex items-center gap-1">
+                                            <span>⏳</span> Recepción
+                                        </p>
+                                        <p class="text-xs font-bold text-amber-900">No completada aún</p>
+                                    </div>
+                                </div>
+
+                                <div class="bg-slate-50 rounded-3xl p-6 border border-slate-200 flex items-center justify-around">
+                                    <div class="text-center">
+                                        <p class="text-xs text-slate-500 font-black uppercase mb-1">Ciclos de Descarga</p>
+                                        <p class="text-5xl font-black text-slate-900">{{ Math.round(datosOrden.Ciclos_Necesarios) }}</p>
+                                        <p class="text-[10px] text-red-600 font-bold mt-1 uppercase">Viajes estimados</p>
+                                    </div>
+                                    <div class="h-12 w-[1px] bg-slate-200"></div>
+                                    <div class="text-center">
+                                        <p class="text-xs text-slate-500 font-black uppercase mb-1">Sucursal Sugerida</p>
+                                        <p class="text-3xl font-black text-red-600 truncate max-w-[150px] mx-auto" :title="getSucursalNombre(datosOrden.Muelle_Destino)">{{ getSucursalNombre(datosOrden.Muelle_Destino) }}</p>
+                                        <p class="text-[10px] text-slate-400 font-bold mt-1 uppercase">Destino de Recepción</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Ticket Footer Action -->
-                    <div class="px-6 py-4 bg-[#fcfbf8] border-t border-[#eef0eb] flex justify-between items-center text-xs">
-                        <span class="text-[#888c80] italic">Cálculos proyectados basados en 96 bultos por ciclo.</span>
-                        <button @click="imprimirTicket" class="text-primary hover:underline font-bold uppercase tracking-wider">Imprimir Ticket Recepción</button>
+                        <!-- Tiempo Óptimo con selector de operarios -->
+                        <div v-if="tiempoOptimo" class="mx-8 mb-8 bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-6 text-white">
+                            <div class="flex items-center justify-between flex-wrap gap-4">
+                                <div>
+                                    <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Tiempo Óptimo de Descarga</p>
+                                    <p class="text-4xl font-black">
+                                        {{ formatMinutos(tiempoOptimo.tiempo_optimo_minutos) }}
+                                        <span class="text-lg text-slate-400 font-medium ml-2">con {{ tiempoOptimo.operarios_usados }} equipo{{ tiempoOptimo.operarios_usados !== 1 ? 's' : '' }}</span>
+                                    </p>
+                                    <p class="text-xs text-slate-500 mt-1">Tiempo base sin optimizar: {{ formatMinutos(tiempoOptimo.tiempo_base_minutos) }}</p>
+                                </div>
+                                <div class="flex items-center gap-4 bg-slate-800 rounded-xl p-4 border border-slate-700">
+                                    <div class="text-center">
+                                        <p class="text-[10px] text-slate-400 font-bold uppercase mb-2">Equipos operativos</p>
+                                        <div class="flex items-center gap-2">
+                                            <button @click="operariosSeleccionados = Math.max(1, operariosSeleccionados - 1); recalcularTiempo()"
+                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-red-600 transition-colors font-bold">−</button>
+                                            <span class="text-2xl font-black w-8 text-center" title="1 Equipo = 1 Receptor + 1 Carga">{{ operariosSeleccionados }}</span>
+                                            <button @click="operariosSeleccionados++; recalcularTiempo()"
+                                                class="w-8 h-8 bg-slate-700 rounded-lg flex items-center justify-center hover:bg-red-600 transition-colors font-bold">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="h-10 w-[1px] bg-slate-600"></div>
+                                    <div class="text-xs space-y-1">
+                                        <p class="text-slate-400"><span class="text-emerald-400 font-bold">{{ tiempoOptimo.receptores_disponibles }}</span> receptores disp.</p>
+                                        <p class="text-slate-400"><span class="text-blue-400 font-bold">{{ tiempoOptimo.carga_disponibles }}</span> carga disp.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-50 border-t border-slate-100 px-8 py-4 flex justify-between items-center">
+                            <p class="text-[10px] text-slate-400 font-bold uppercase italic">Los cálculos están basados en una capacidad de 96 cajas por ciclo.</p>
+                            <button @click="imprimirTicket" class="text-red-600 font-bold text-xs hover:underline uppercase tracking-widest">Imprimir Ticket de Recepción</button>
+                        </div>
                     </div>
                 </div>
+
             </div>
         </div>
 
-        <!-- MODAL DE PRODUCTOS (SKUS) -->
-        <Modal :show="mostrarModalSKU" max-width="2xl" @close="cerrarModalSKU">
+        <!-- MODAL DE PRODUCTOS -->
+        <Modal :show="mostrarModalSKU" max-width="3xl" @close="cerrarModalSKU">
             <div class="bg-white rounded-2xl overflow-hidden">
-                <div class="bg-[#1c1c1c] px-6 py-5 text-white flex items-center justify-between">
+                <div class="bg-slate-900 px-8 py-6 flex items-center justify-between">
                     <div>
-                        <h3 class="text-base font-bold">Detalle de Productos</h3>
-                        <p class="text-xs text-[#888c80] mt-0.5">Variedad de la Orden: {{ datosOrden?.Numero_OC }}</p>
+                        <h3 class="text-lg font-black text-white tracking-tight">Detalle de Productos</h3>
+                        <p class="text-slate-400 text-sm font-medium mt-0.5">Orden <span class="text-red-500 font-bold font-mono">{{ datosOrden?.Numero_OC }}</span> — {{ productosOrden.length }} Producto{{ productosOrden.length !== 1 ? 's' : '' }}</p>
                     </div>
-                    <button @click="cerrarModalSKU" class="text-[#888c80] hover:text-white">
+                    <button @click="cerrarModalSKU" class="text-slate-400 hover:text-white hover:bg-slate-700 p-2 rounded-xl transition-all">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
-                <div class="px-6 py-3 border-b border-[#eef0eb] bg-[#fcfbf8]/60">
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-[#888c80]"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></span>
-                        <input v-model="busquedaProducto" type="text" placeholder="Buscar por código o nombre de producto..."
-                            class="block w-full pl-9 pr-4 py-2 border-[#eef0eb] bg-white focus:border-primary focus:ring-primary/20 rounded-xl transition-all text-xs">
+                <div class="px-8 py-4 border-b border-slate-100 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div class="relative w-full sm:w-72">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></span>
+                        <input v-model="busquedaProducto" type="text" placeholder="Buscar por código o nombre..."
+                            class="block w-full pl-10 pr-4 py-2 text-sm border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-xl transition-all">
+                    </div>
+
+                    <!-- ACCIONES DE VERIFICACIÓN EN LOTE -->
+                    <div class="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+                        <div v-if="productosOrden.length > 0" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shrink-0"
+                            :class="totalVerificados === productosOrden.length ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : (totalVerificados > 0 ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-slate-200/70 text-slate-600 border-slate-300')">
+                            <span class="w-2 h-2 rounded-full" :class="totalVerificados === productosOrden.length ? 'bg-emerald-500 animate-pulse' : (totalVerificados > 0 ? 'bg-amber-500' : 'bg-slate-400')"></span>
+                            <span>Revisados: {{ totalVerificados }} / {{ productosOrden.length }}</span>
+                        </div>
+                        <button @click="toggleVerificarTodos"
+                            class="px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shadow-sm active:scale-95 whitespace-nowrap shrink-0 cursor-pointer"
+                            :class="productosFiltrados.length && productosFiltrados.every(p => isProductoRevisado(p.codigo))
+                                ? 'bg-slate-200 text-slate-700 hover:bg-slate-300 border border-slate-300'
+                                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/20'">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                            {{ productosFiltrados.length && productosFiltrados.every(p => isProductoRevisado(p.codigo)) ? 'Desmarcar Todos' : 'Marcar Todos' }}
+                        </button>
                     </div>
                 </div>
-                <div class="max-h-96 overflow-y-auto">
-                    <table class="w-full text-xs">
-                        <thead class="bg-[#fcfbf8] sticky top-0 border-b border-[#eef0eb] z-10 text-[#888c80]">
+                <div class="max-h-[400px] overflow-y-auto">
+                    <table class="w-full">
+                        <thead class="bg-slate-50 sticky top-0 z-10">
                             <tr>
-                                <th class="px-6 py-2.5 text-left font-bold uppercase">Cód.</th>
-                                <th class="px-4 py-2.5 text-left font-bold uppercase">Descripción</th>
-                                <th class="px-4 py-2.5 text-center font-bold uppercase">Cantidad</th>
-                                <th class="px-6 py-2.5 text-center font-bold uppercase">Volumen</th>
+                                <th class="px-4 py-3 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest w-12">✓</th>
+                                <th class="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">#</th>
+                                <th class="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Código</th>
+                                <th class="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Producto</th>
+                                <th class="px-4 py-3 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Medida</th>
+                                <th class="px-6 py-3 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">Volumen Físico</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-[#eef0eb]">
-                            <tr v-for="(producto, idx) in productosFiltrados" :key="idx" class="hover:bg-[#fcfbf8]/40 transition-colors">
-                                <td class="px-6 py-3 font-mono font-bold text-primary">{{ producto.codigo }}</td>
-                                <td class="px-4 py-3 font-medium text-[#1c1c1c]">{{ producto.producto }}</td>
-                                <td class="px-4 py-3 text-center">
-                                    <span class="font-bold text-[#1c1c1c] bg-[#f5f6f2] px-2 py-0.5 rounded border border-[#eef0eb]">
-                                        {{ Math.round(producto.cantidad_unidades) }} {{ producto.c_presenta || 'und' }}
+                        <tbody class="divide-y divide-slate-100">
+                            <tr v-for="(producto, index) in productosFiltrados" :key="index"
+                                :class="isProductoRevisado(producto.codigo)
+                                    ? 'bg-emerald-50/90 border-l-4 border-emerald-500 shadow-sm transition-all group'
+                                    : 'hover:bg-red-50/40 transition-colors group'">
+                                
+                                <!-- CHECKBOX / BOTÓN DE VERIFICACIÓN -->
+                                <td class="px-4 py-3.5 text-center">
+                                    <button @click.stop="toggleVerificarProducto(producto.codigo)"
+                                        class="inline-flex items-center justify-center p-1.5 rounded-xl transition-all duration-200 focus:outline-none active:scale-90 cursor-pointer"
+                                        :class="isProductoRevisado(producto.codigo)
+                                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 hover:bg-emerald-700 ring-2 ring-emerald-500/20'
+                                            : 'bg-white text-slate-300 border-2 border-slate-300 hover:border-emerald-500 hover:text-emerald-600'"
+                                        :title="isProductoRevisado(producto.codigo) ? 'Producto Revisado (Clic para desmarcar)' : 'Clic para marcar como Revisado'">
+                                        <svg v-if="isProductoRevisado(producto.codigo)" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+                                        </svg>
+                                        <div v-else class="w-3.5 h-3.5 rounded-sm"></div>
+                                    </button>
+                                </td>
+
+                                <td class="px-4 py-3.5">
+                                    <span class="text-xs font-bold" :class="isProductoRevisado(producto.codigo) ? 'text-emerald-700 font-mono' : 'text-slate-300'">{{ index + 1 }}</span>
+                                </td>
+
+                                <td class="px-4 py-3.5">
+                                    <span class="font-mono text-sm font-bold px-2 py-0.5 rounded transition-colors"
+                                        :class="isProductoRevisado(producto.codigo)
+                                            ? 'bg-emerald-200/90 text-emerald-950 font-black border border-emerald-300/80'
+                                            : 'bg-slate-100 text-slate-700 group-hover:bg-red-100 group-hover:text-red-700'">
+                                        {{ producto.codigo }}
                                     </span>
                                 </td>
-                                <td class="px-6 py-3 text-center">
-                                    <span :class="categoriaPorFactor(producto.factor_carrito).color" class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                                        {{ categoriaPorFactor(producto.factor_carrito).texto }}
-                                    </span>
+
+                                <td class="px-4 py-3.5">
+                                    <div class="flex items-center gap-2">
+                                        <p class="text-sm font-semibold leading-tight" :class="isProductoRevisado(producto.codigo) ? 'text-emerald-950 font-bold' : 'text-slate-700'">
+                                            {{ producto.producto || 'Sin descripción' }}
+                                        </p>
+                                        <span v-if="isProductoRevisado(producto.codigo)" class="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-tighter bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-sm shrink-0">
+                                            ✓ REVISADO
+                                        </span>
+                                    </div>
                                 </td>
+
+                                <td class="px-4 py-3.5 text-center">
+                                    <div v-if="producto.c_departamento === '14'">
+                                        <div class="flex flex-col items-center">
+                                            <span class="text-[9px] font-black uppercase tracking-tighter mb-0.5" 
+                                                :class="producto.categoria_fruver === 'Hortaliza' ? 'text-lime-600' : (producto.categoria_fruver === 'Fruta' ? 'text-orange-600' : 'text-emerald-600')">
+                                                {{ producto.categoria_fruver }}
+                                            </span>
+                                            <span v-if="producto.c_presenta?.trim() === 'KG'" class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded shadow-sm border border-slate-200">
+                                                {{ parseFloat(producto.cantidad_unidades).toFixed(2) }} kg
+                                            </span>
+                                            <div v-else class="flex flex-col items-center">
+                                                <span class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded shadow-sm border border-slate-200">
+                                                    {{ Math.round(producto.cantidad_unidades) }} und
+                                                </span>
+                                                <span v-if="producto.unidades_por_caja > 1" class="text-[9px] text-slate-400 font-bold mt-0.5">
+                                                    ({{ Math.round(producto.bultos) }} cajas de {{ Math.round(producto.unidades_por_caja) }})
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else-if="['10', '11', '12', '13', '15', '21', '23'].includes(producto.c_departamento?.trim())">
+                                        <div class="flex flex-col items-center">
+                                            <span class="text-[9px] font-black uppercase tracking-tighter mb-0.5" 
+                                                :class="producto.categoria_perecedero === 'Carnes' ? 'text-rose-600' : (producto.categoria_perecedero === 'Charcutería' ? 'text-amber-600' : (producto.categoria_perecedero === 'Pescadería' ? 'text-blue-600' : 'text-cyan-600'))">
+                                                {{ producto.categoria_perecedero }}
+                                            </span>
+                                            <span v-if="producto.c_presenta?.trim() === 'KG'" class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-1 rounded shadow-sm border border-slate-200">
+                                                {{ parseFloat(producto.cantidad_unidades).toFixed(2) }} kg
+                                            </span>
+                                            <span v-else class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-1 rounded shadow-sm border border-slate-200">
+                                                {{ Math.round(producto.cantidad_unidades) }} und
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div v-else class="flex flex-col items-center">
+                                        <span v-if="producto.c_presenta?.trim() === 'KG'" class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded shadow-sm border border-slate-200">
+                                            {{ parseFloat(producto.cantidad_unidades).toFixed(2) }} kg
+                                        </span>
+                                        <template v-else>
+                                            <span class="text-xs font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded shadow-sm border border-slate-200">
+                                                {{ Math.round(producto.cantidad_unidades) }} und
+                                            </span>
+                                            <span v-if="producto.unidades_por_caja > 1" class="text-[9px] text-slate-400 font-bold mt-0.5">
+                                                ({{ Math.round(producto.bultos) }} bultos/cajas de {{ Math.round(producto.unidades_por_caja) }})
+                                            </span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-3.5 text-center"><span class="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full" :class="categoriaPorFactor(producto.factor_carrito).color">{{ categoriaPorFactor(producto.factor_carrito).icono }} {{ categoriaPorFactor(producto.factor_carrito).texto }}</span></td>
                             </tr>
+                            <tr v-if="productosFiltrados.length === 0"><td colspan="6" class="px-8 py-10 text-center"><p class="text-slate-400 text-sm font-medium">No se encontraron productos.</p></td></tr>
                         </tbody>
                     </table>
                 </div>
+                <div class="bg-slate-50 border-t border-slate-200 px-8 py-4 flex items-center justify-between">
+                    <div class="flex items-center gap-6">
+                        <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Total Productos:</span><span class="text-sm font-black text-slate-800">{{ productosOrden.length }}</span></div>
+                        <div class="h-4 w-[1px] bg-slate-300"></div>
+                        <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Total Bultos:</span><span class="text-sm font-black text-red-600">{{ totalBultos }}</span></div>
+                        <div class="h-4 w-[1px] bg-slate-300"></div>
+                        <div class="flex items-center gap-2"><span class="text-[10px] font-black text-slate-400 uppercase">Revisados:</span><span class="text-sm font-black text-emerald-600 font-mono">{{ totalVerificados }} / {{ productosOrden.length }}</span></div>
+                    </div>
+                    <button @click="cerrarModalSKU" class="px-5 py-2 bg-slate-900 text-white text-xs font-bold uppercase tracking-wider rounded-xl hover:bg-red-600 transition-all duration-300 active:scale-95 cursor-pointer">Cerrar</button>
+                </div>
             </div>
         </Modal>
-
-        <!-- Modal de Reprogramación (Admin) -->
+        <!-- Modal de Reprogramación -->
         <Modal :show="mostrarModalReprogramar" @close="mostrarModalReprogramar = false">
             <div class="p-6">
-                <h3 class="text-lg font-bold text-[#1c1c1c] mb-4">Reprogramar Cita</h3>
+                <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Reprogramar Cita
+                </h3>
+                
+                <div v-if="citaReprogramar" class="mb-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                    <p class="font-bold text-slate-800 font-mono">{{ citaReprogramar.numero_oc }}</p>
+                    <p class="text-sm text-slate-600">{{ citaReprogramar.proveedor }}</p>
+                </div>
+
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-xs font-bold text-[#888c80] uppercase mb-1">Nueva Fecha y Hora</label>
-                        <input v-model="formReprogramar.fecha_cita" type="datetime-local" class="w-full rounded-xl border-[#eef0eb] focus:border-primary focus:ring-primary/20">
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Nueva Fecha y Hora</label>
+                        <input v-model="formReprogramar.fecha_cita" type="datetime-local" class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500">
                     </div>
+                    
                     <div>
-                        <label class="block text-xs font-bold text-[#888c80] uppercase mb-1">Muelle / Destino</label>
-                        <select v-model="formReprogramar.muelle_asignado" class="w-full rounded-xl border-[#eef0eb] focus:border-primary focus:ring-primary/20 bg-white">
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Sucursal Asignada</label>
+                        <select v-model="formReprogramar.muelle_asignado" class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500">
                             <option value="0101">0101 (Hiper)</option>
                             <option value="0102">0102 (Dep Gral)</option>
                             <option value="0111">0111 (Producción)</option>
                             <option value="0115">0115 (Insumos)</option>
                             <option value="0161">0161 (Andinka)</option>
+                            <option value="01">01 (Galpón)</option>
+                            <option value="02">02 (Galpón)</option>
+                            <option value="03">03 (Galpón)</option>
+                            <option value="04">04 (Galpón)</option>
                         </select>
                     </div>
+
                     <div>
-                        <label class="block text-xs font-bold text-[#888c80] uppercase mb-1">Justificación del Cambio</label>
-                        <textarea v-model="formReprogramar.motivo" rows="3" class="w-full rounded-xl border-[#eef0eb] focus:border-primary focus:ring-primary/20 text-xs" placeholder="Explique brevemente..."></textarea>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Motivo de Reprogramación (Obligatorio)</label>
+                        <textarea v-model="formReprogramar.motivo" rows="3" placeholder="Explique brevemente el motivo de este cambio..." class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500"></textarea>
+                    </div>
+                    
+                    <p v-if="errorReprogramacion" class="text-red-500 text-sm font-medium">{{ errorReprogramacion }}</p>
+                </div>
+
+                <div class="mt-6 flex justify-end gap-3">
+                    <button @click="mostrarModalReprogramar = false" class="px-5 py-2.5 rounded-xl text-slate-600 font-bold hover:bg-slate-100 transition-colors">
+                        Cancelar
+                    </button>
+                    <button @click="guardarReprogramacion" :disabled="procesandoReprogramacion"
+                        class="bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                        {{ procesandoReprogramacion ? 'Guardando...' : 'Guardar Cambios' }}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+
+        <!-- Modal Cancelar Cita -->
+        <Modal :show="mostrarModalCancelar" @close="mostrarModalCancelar = false" max-width="md">
+            <div class="bg-white rounded-2xl overflow-hidden">
+                <div class="bg-red-600 px-6 py-4 flex items-center justify-between">
+                    <h3 class="text-lg font-black text-white">Cancelar Cita</h3>
+                    <button @click="mostrarModalCancelar = false" class="text-red-200 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <div class="p-6">
+                    <p class="text-sm text-slate-600 mb-4">¿Está seguro que desea cancelar esta cita? Esta acción notificará al equipo de Compras y Recepción.</p>
+                    
+                    <label class="block text-sm font-bold text-slate-700 mb-2">Motivo de Cancelación (Obligatorio)</label>
+                    <textarea v-model="motivoCancelacion" rows="3" placeholder="Explique brevemente el motivo de la cancelación..." 
+                        class="w-full rounded-xl border-slate-300 focus:border-red-500 focus:ring-red-500 text-sm"></textarea>
+                    
+                    <p v-if="errorCancelacion" class="text-red-500 text-xs font-bold mt-2">{{ errorCancelacion }}</p>
+                    
+                    <div class="mt-6 flex justify-end gap-3">
+                        <button @click="mostrarModalCancelar = false" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
+                            Volver
+                        </button>
+                        <button @click="guardarCancelacion" :disabled="procesandoCancelacion || motivoCancelacion.length < 5"
+                            class="bg-red-600 text-white px-4 py-2 text-sm font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50">
+                            {{ procesandoCancelacion ? 'Cancelando...' : 'Confirmar Cancelación' }}
+                        </button>
                     </div>
                 </div>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button @click="mostrarModalReprogramar = false" class="px-4 py-2 text-xs font-bold text-[#6c7263]">Cancelar</button>
-                    <button @click="guardarReprogramacion" :disabled="procesandoReprogramacion" class="bg-[#1c1c1c] hover:bg-zinc-800 text-white px-5 py-2 rounded-xl text-xs font-bold">
-                        Guardar
+            </div>
+        </Modal>
+
+        <!-- Modal Finalizar Cita -->
+        <Modal :show="mostrarModalFinalizar" @close="mostrarModalFinalizar = false" maxWidth="md">
+            <div class="p-8">
+                <div class="text-center">
+                    <div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-emerald-100 mb-6">
+                        <svg class="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                    <h3 class="text-2xl font-black text-slate-800 mb-2">Completar Recepción</h3>
+                    <p class="text-slate-500 mb-6 font-medium">¿Confirma que la cita <span class="font-bold text-slate-700 font-mono">{{ citaFinalizar?.numero_oc }}</span> ha sido recibida y procesada correctamente?</p>
+                </div>
+                
+                <div class="mt-8 flex gap-3">
+                    <button type="button" class="w-1/2 justify-center bg-white border-2 border-slate-200 text-slate-600 px-4 py-3 rounded-xl font-bold hover:bg-slate-50 hover:text-slate-800 transition-colors" @click="mostrarModalFinalizar = false">Cancelar</button>
+                    <button type="button" class="w-1/2 justify-center bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-500/30 flex items-center gap-2" :class="{ 'opacity-50 cursor-not-allowed': procesandoFinalizar }" :disabled="procesandoFinalizar" @click="confirmarFinalizar">
+                        <span v-if="procesandoFinalizar" class="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+                        <span v-else>Sí, Completar</span>
                     </button>
                 </div>
             </div>
         </Modal>
 
-        <!-- Modal Cancelar Cita (Proveedor) -->
-        <Modal :show="mostrarModalCancelar" @close="mostrarModalCancelar = false">
-            <div class="p-6">
-                <h3 class="text-lg font-bold text-rose-600 mb-3">Cancelar Cita</h3>
-                <p class="text-xs text-[#6c7263] mb-4">Esta acción cancelará definitivamente la cita. Debes justificar el motivo.</p>
-                <textarea v-model="motivoCancelacion" rows="3" class="w-full rounded-xl border-[#eef0eb] focus:border-rose-500 focus:ring-rose-500/20 text-xs" placeholder="Indique el motivo..."></textarea>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button @click="mostrarModalCancelar = false" class="px-4 py-2 text-xs font-bold text-[#6c7263]">Cerrar</button>
-                    <button @click="guardarCancelacion" :disabled="procesandoCancelacion || motivoCancelacion.length < 5" class="bg-rose-600 hover:bg-rose-700 text-white px-5 py-2 rounded-xl text-xs font-bold">
-                        Confirmar Cancelación
+        <!-- Modal Subir Factura -->
+        <Modal :show="mostrarModalSubirFactura" @close="mostrarModalSubirFactura = false" maxWidth="md">
+            <div class="p-8">
+                <div class="text-center mb-6">
+                    <h3 class="text-xl font-black text-slate-800 mb-1">Cargar Nueva Factura</h3>
+                    <p class="text-slate-500 text-sm">Sube la factura corregida para la cita seleccionada.</p>
+                </div>
+                
+                <form @submit.prevent="guardarNuevaFactura">
+                    <div class="space-y-4 text-left">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700">Nº de Factura</label>
+                            <input v-model="formFactura.numero_factura" type="text" required class="mt-1 block w-full rounded-md border-slate-300" placeholder="Ej: 12345">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-center">
+                                <label class="block text-sm font-bold text-slate-700">Peso en Factura (Ton)</label>
+                                <span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">1 Ton = 1.000 Kg</span>
+                            </div>
+                            <input v-model="formFactura.peso_factura_ton" type="number" step="any" required class="mt-1 block w-full rounded-md border-slate-300" placeholder="Ej: 0.050 para 50 Kg | 2.5 para 2.5 Ton">
+                            <div v-if="Number(formFactura.peso_factura_ton) > 0" class="mt-1.5 text-xs">
+                                <p class="text-slate-500 font-medium">Equivale a: <strong class="text-slate-700">{{ (Number(formFactura.peso_factura_ton) * 1000).toLocaleString('es-VE') }} Kg</strong></p>
+                                <div v-if="Number(formFactura.peso_factura_ton) >= 10" class="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] flex flex-wrap items-center justify-between gap-1">
+                                    <span>⚠️ ¿Ingresó en <strong>Kilos</strong>? ({{ formFactura.peso_factura_ton }} Kg = {{ (Number(formFactura.peso_factura_ton) / 1000).toFixed(3) }} Ton)</span>
+                                    <button type="button" @click="formFactura.peso_factura_ton = Number((Number(formFactura.peso_factura_ton) / 1000).toFixed(3))" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded text-[10px] whitespace-nowrap shadow-sm">
+                                        Corregir a {{ (Number(formFactura.peso_factura_ton) / 1000).toFixed(3) }} Ton
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700">Archivo de Factura (PDF/Imagen)</label>
+                            <input type="file" @change="handleFacturaFileUpload" accept=".pdf,image/*" required class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
+                        </div>
+                        <p v-if="errorFactura" class="text-red-500 text-sm font-medium">{{ errorFactura }}</p>
+                    </div>
+
+                    <div class="mt-8 flex gap-3">
+                        <button type="button" class="w-1/2 bg-white border-2 border-slate-200 text-slate-600 px-4 py-3 rounded-xl font-bold hover:bg-slate-50" @click="mostrarModalSubirFactura = false">Cancelar</button>
+                        <button type="submit" class="w-1/2 bg-emerald-600 text-white px-4 py-3 rounded-xl font-bold hover:bg-emerald-700 flex items-center justify-center gap-2" :disabled="procesandoFactura">
+                            <span v-if="procesandoFactura" class="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+                            <span v-else>Guardar Factura</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </Modal>
+
+        <!-- Modal Reprogramar Cita -->
+        <Modal :show="mostrarModalReprogramarProveedor" @close="mostrarModalReprogramarProveedor = false" max-width="md">
+            <div class="bg-white rounded-2xl overflow-hidden">
+                <div class="bg-orange-500 px-6 py-4 flex items-center justify-between">
+                    <h3 class="text-lg font-black text-white">Reprogramar Cita</h3>
+                    <button @click="mostrarModalReprogramarProveedor = false" class="text-orange-200 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
+                </div>
+                <div class="p-6">
+                    <p class="text-sm text-slate-600 mb-4">Para reprogramar la cita debes justificar el motivo. Al continuar serás llevado al calendario para elegir una nueva fecha y hora. Esta acción notificará al equipo de Compras y Recepción.</p>
+                    
+                    <label class="block text-sm font-bold text-slate-700 mb-2">Motivo de Reprogramación (Obligatorio)</label>
+                    <textarea v-model="motivoReprogramacion" rows="3" placeholder="Explique brevemente el motivo..." 
+                        class="w-full rounded-xl border-slate-300 focus:border-orange-500 focus:ring-orange-500 text-sm"></textarea>
+                    
+                    <p v-if="errorReprogramacion" class="text-red-500 text-xs font-bold mt-2">{{ errorReprogramacion }}</p>
+                    
+                    <div class="mt-6 flex justify-end gap-3">
+                        <button @click="mostrarModalReprogramarProveedor = false" class="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors">
+                            Volver
+                        </button>
+                        <button @click="continuarReprogramacion" :disabled="motivoReprogramacion.length < 5"
+                            class="bg-orange-500 text-white px-4 py-2 text-sm font-bold rounded-xl hover:bg-orange-600 transition-colors disabled:opacity-50">
+                            Ir al Calendario
+                        </button>
+                    </div>
                 </div>
             </div>
         </Modal>
 
-        <!-- Modal Finalizar Cita (Admin) -->
-        <Modal :show="mostrarModalFinalizar" @close="mostrarModalFinalizar = false">
-            <div class="p-6">
-                <h3 class="text-lg font-bold text-[#1c1c1c] mb-3">Finalizar Recepción</h3>
-                <p class="text-xs text-[#6c7263] mb-4">Marcarás la descarga de la OC {{ citaFinalizar?.numero_oc }} como completada en muelle.</p>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button @click="mostrarModalFinalizar = false" class="px-4 py-2 text-xs font-bold text-[#6c7263]">Cancelar</button>
-                    <button @click="confirmarFinalizar" :disabled="procesandoFinalizar" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 rounded-xl text-xs font-bold">
-                        Marcar Completada
+        <!-- Modal Video Tutorial Interactivo de Agendamiento -->
+        <Modal :show="mostrarModalVideo" @close="mostrarModalVideo = false" max-width="4xl">
+            <div class="bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl text-white">
+                <!-- Header del Modal -->
+                <div class="p-4 sm:p-5 flex items-center justify-between border-b border-slate-800 bg-slate-950/80">
+                    <div class="flex items-center gap-3">
+                        <span class="w-10 h-10 rounded-2xl bg-red-600/20 text-red-500 flex items-center justify-center text-xl shadow-inner">🎬</span>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-white font-extrabold text-sm sm:text-base leading-tight">Tutorial Interactivo: Cómo Agendar su Cita en CITSUR</h3>
+                                <span class="bg-red-500/20 text-red-400 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">Oficial</span>
+                            </div>
+                            <p class="text-slate-400 text-xs mt-0.5">Guía paso a paso ilustrada para proveedores de Hipersuraki C.A.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button @click="toggleAutoPlay" class="px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5"
+                            :class="tutorialAutoPlay ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'">
+                            <span>{{ tutorialAutoPlay ? '▶️ Auto (5s)' : '⏸️ Pausado' }}</span>
+                        </button>
+                        <button @click="mostrarModalVideo = false" class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Barra de Pasos Clickables -->
+                <div class="bg-slate-950/40 border-b border-slate-800 px-4 py-2.5 overflow-x-auto flex items-center gap-2 no-scrollbar">
+                    <button v-for="(slide, idx) in tutorialSlides" :key="idx" @click="irPasoTutorial(idx)"
+                        class="px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer"
+                        :class="pasoTutorial === idx ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105' : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'">
+                        <span class="w-4 h-4 rounded-full flex items-center justify-center text-[10px]" :class="pasoTutorial === idx ? 'bg-white text-red-600 font-black' : 'bg-slate-700 text-slate-300'">{{ idx + 1 }}</span>
+                        <span>{{ slide.badge }}</span>
                     </button>
                 </div>
-            </div>
-        </Modal>
 
-        <!-- Modal Reprogramar Cita (Proveedor) -->
-        <Modal :show="mostrarModalReprogramarProveedor" @close="mostrarModalReprogramarProveedor = false">
-            <div class="p-6">
-                <h3 class="text-lg font-bold text-orange-600 mb-3">Reprogramar Entrega</h3>
-                <p class="text-xs text-[#6c7263] mb-4 font-medium">Justifica el cambio para habilitar el calendario de reprogramaciones.</p>
-                <textarea v-model="motivoReprogramacion" rows="3" class="w-full rounded-xl border-[#eef0eb] focus:border-orange-500 focus:ring-orange-500/20 text-xs" placeholder="Motivo de reprogramación..."></textarea>
-                <div class="mt-6 flex justify-end gap-3">
-                    <button @click="mostrarModalReprogramarProveedor = false" class="px-4 py-2 text-xs font-bold text-[#6c7263]">Cerrar</button>
-                    <button @click="continuarReprogramacion" :disabled="motivoReprogramacion.length < 5" class="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-xl text-xs font-bold">
-                        Elegir Nueva Fecha
+                <!-- Visor Central de la Pantalla -->
+                <div class="relative bg-black flex items-center justify-center p-2 sm:p-4 min-h-[300px] sm:min-h-[420px] max-h-[55vh] overflow-hidden">
+                    <img :src="tutorialSlides[pasoTutorial].imagen" :alt="tutorialSlides[pasoTutorial].titulo"
+                        class="rounded-2xl max-h-[50vh] w-auto max-w-full object-contain border border-slate-800 shadow-2xl transition-all duration-300" />
+                    
+                    <!-- Botones de Navegación Anterior / Siguiente -->
+                    <button @click="anteriorPasoTutorial" 
+                        class="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-red-600 text-white flex items-center justify-center backdrop-blur shadow-xl border border-slate-700 transition-all hover:scale-110 active:scale-95"
+                        title="Paso Anterior">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"></path></svg>
                     </button>
+                    <button @click="siguientePasoTutorial" 
+                        class="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-red-600 text-white flex items-center justify-center backdrop-blur shadow-xl border border-slate-700 transition-all hover:scale-110 active:scale-95"
+                        title="Siguiente Paso">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                </div>
+
+                <!-- Detalle y Explicación del Paso Activo -->
+                <div class="p-4 sm:p-5 bg-slate-900/95 border-t border-slate-800 space-y-3">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center text-xs font-black">{{ pasoTutorial + 1 }}</span>
+                            <h4 class="text-white font-black text-sm sm:text-base">{{ tutorialSlides[pasoTutorial].titulo }}</h4>
+                        </div>
+                        <span class="text-slate-400 text-xs font-mono font-bold">Paso {{ pasoTutorial + 1 }} de {{ tutorialSlides.length }}</span>
+                    </div>
+
+                    <p class="text-slate-300 text-xs sm:text-sm leading-relaxed">{{ tutorialSlides[pasoTutorial].descripcion }}</p>
+
+                    <!-- Cuadro de Nota Destacada -->
+                    <div class="bg-amber-500/10 border-l-4 border-amber-500 p-2.5 rounded-r-xl text-xs text-amber-200 flex items-start gap-2">
+                        <span class="text-base leading-none">💡</span>
+                        <span class="font-medium">{{ tutorialSlides[pasoTutorial].nota }}</span>
+                    </div>
+                </div>
+
+                <!-- Footer con Descarga del Manual Oficial -->
+                <div class="p-3 sm:p-4 bg-slate-950 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-800">
+                    <p class="text-xs text-slate-400 text-center sm:text-left">¿Desea una copia física o digital completa? Descargue el Manual Oficial con ilustraciones.</p>
+                    <div class="flex items-center gap-2 w-full sm:w-auto justify-center">
+                        <a href="/Manual_Usuario_Portal_Proveedor_CITSUR.pdf" target="_blank" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-red-600/30">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            <span>Abrir / Descargar Manual PDF</span>
+                        </a>
+                        <button @click="mostrarModalVideo = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all">
+                            Cerrar
+                        </button>
+                    </div>
                 </div>
             </div>
         </Modal>
@@ -918,7 +1754,7 @@ const andenes = computed(() => {
             <div class="max-w-sm mx-auto border-2 border-black p-6 rounded-xl">
                 <div class="text-center mb-6">
                     <h1 class="text-2xl font-black uppercase tracking-widest">TICKET DE RECEPCIÓN</h1>
-                    <p class="text-sm font-bold mt-1">LOGÍSTICA</p>
+                    <p class="text-sm font-bold mt-1">LOGÍSTICA SURAKI</p>
                 </div>
                 
                 <div class="border-t border-b border-black py-4 mb-4">
@@ -964,6 +1800,5 @@ const andenes = computed(() => {
                 </div>
             </div>
         </div>
-
     </AuthenticatedLayout>
 </template>

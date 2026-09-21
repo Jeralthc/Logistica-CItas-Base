@@ -23,12 +23,12 @@ const submit = () => {
 <template>
     <Head title="Recuperar Contraseña - Portal Logístico" />
 
-    <div class="bg-indigo-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
+    <div class="bg-red-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
         <div class="flex-1 text-left">
             <span>📞 0424-7170326</span>
         </div>
         <div class="flex-1 text-center">
-            <span>✉️ contacto@tuempresa.com</span>
+            <span>✉️ hipersurakica@gmail.com</span>
         </div>
         <div class="flex-1 text-right">
             <span>🕒 Horario: 8:00 a.m. a 6:00 p.m.</span>
@@ -44,10 +44,10 @@ const submit = () => {
             <!-- Header del Formulario -->
             <div class="text-center mb-8 flex flex-col items-center">
                 <div class="p-4 bg-white rounded-3xl shadow-lg flex items-center justify-center gap-3 border border-slate-100">
-                    <img src="/images/logo.png" alt="Logo Empresa Base" class="w-12 h-12 object-contain" />
+                    <img src="/images/logo_suraki.ico" alt="Logo Suraki" class="w-12 h-12 object-contain" />
                     <div class="text-left pr-4">
-                       <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">Empresa Base</h2>
-                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-indigo-600">Logística</p>
+                       <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">SURAKI</h2>
+                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-red-600">Logística</p>
                     </div>
                 </div>
                 <h2 class="text-3xl font-bold text-white mt-6 tracking-tight drop-shadow-md">
@@ -58,7 +58,7 @@ const submit = () => {
 
             <div class="w-full max-w-md bg-white p-10 border border-slate-200/60 rounded-3xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] mb-10">
                 <div class="mb-6 text-sm text-slate-600 text-center leading-relaxed">
-                    ¿Olvidaste tu contraseña? No hay problema. Solo ingresa tu Usuario o RIF y te enviaremos un enlace de recuperación al correo electrónico asociado a tu cuenta.
+                    ¿Olvidaste tu contraseña? Ingresa tu <strong>Usuario, Correo electrónico o RIF</strong> y te enviaremos el enlace de recuperación a tu dirección registrada.
                 </div>
 
                 <div v-if="status" class="mb-6 p-4 rounded-xl bg-green-50 border border-green-200 text-sm font-medium text-green-700 text-center">
@@ -67,17 +67,17 @@ const submit = () => {
 
                 <form @submit.prevent="submit">
                     <div>
-                        <InputLabel for="username" value="Usuario / RIF" class="font-semibold text-slate-800" />
+                        <InputLabel for="username" value="Usuario, Correo o RIF" class="font-semibold text-slate-800" />
 
                         <TextInput
                             id="username"
                             type="text"
-                            class="mt-2 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
+                            class="mt-2 block w-full border-slate-200 focus:border-red-600 focus:ring-red-600/20 rounded-xl shadow-sm px-4 py-3 bg-white/50 transition-all hover:bg-white"
                             v-model="form.username"
                             required
                             autofocus
                             autocomplete="username"
-                            placeholder="Ej: Recepcion.Romulo o J-12345678-9"
+                            placeholder="Ej: tu-correo@ejemplo.com, usuario o J-12345678-9"
                         />
 
                         <InputError class="mt-2" :message="form.errors.username" />
@@ -85,14 +85,14 @@ const submit = () => {
 
                     <div class="mt-8 flex flex-col gap-4 items-center">
                         <PrimaryButton 
-                            class="w-full justify-center text-lg py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-2xl shadow-lg shadow-indigo-600/30 transition-all duration-300 hover:shadow-indigo-600/50 hover:-translate-y-0.5"
+                            class="w-full justify-center text-lg py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-2xl shadow-lg shadow-red-600/30 transition-all duration-300 hover:shadow-red-600/50 hover:-translate-y-0.5"
                             :class="{ 'opacity-25': form.processing }"
                             :disabled="form.processing"
                         >
                             ENVIAR ENLACE
                         </PrimaryButton>
 
-                        <Link :href="route('login')" class="text-sm text-slate-600 hover:text-indigo-600 font-medium transition-colors">
+                        <Link :href="route('login')" class="text-sm text-slate-600 hover:text-red-600 font-medium transition-colors">
                             Volver al inicio de sesión
                         </Link>
                     </div>
@@ -101,12 +101,12 @@ const submit = () => {
         </div>
 
         <!-- Corporate Footer -->
-        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-indigo-600 z-10">
+        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-red-600 z-10">
             <div class="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div>
                     <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">
-                        <img src="/images/logo.png" alt="Logo" class="w-6 h-6 grayscale brightness-200" />
-                        Empresa Base LOGÍSTICA
+                        <img src="/images/logo_suraki.ico" alt="Logo" class="w-6 h-6 grayscale brightness-200" />
+                        SURAKI LOGÍSTICA
                     </h3>
                     <p class="text-sm leading-relaxed max-w-sm">
                         Sistema integral para la gestión de citas, recepción de mercancía y optimización de tiempos en andén.
@@ -116,14 +116,14 @@ const submit = () => {
                     <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Soporte Técnico</h4>
                     <ul class="space-y-2 text-sm">
                         <li>📞 0424-7475109</li>
-                        <li>✉️ soporte@tuempresa.com</li>
+                        <li>✉️ sistemassuraki@gmail.com</li>
                         <li>🕒 Lunes a Lunes: 7:00 am - 10:00 pm</li>
                     </ul>
                 </div>
             </div>
             <div class="max-w-6xl mx-auto px-6 mt-10 pt-6 border-t border-slate-800 text-xs text-center text-slate-500">
-                &copy; {{ new Date().getFullYear() }} Portal Logístico Empresa Base. Todos los derechos reservados. <br>
-                Desarrollado por el Departamento de Sistemas.
+                &copy; {{ new Date().getFullYear() }} Portal Logístico Suraki. Todos los derechos reservados. <br>
+                Desarrollado por el Departamento de Sistemas de Suraki.
             </div>
         </footer>
     </div>

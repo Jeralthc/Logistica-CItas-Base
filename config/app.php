@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Sistema Base'),
+    'name' => env('APP_NAME', 'Laravel'),
 
     /*
     |--------------------------------------------------------------------------
@@ -53,6 +53,10 @@ return [
     */
 
     'url' => env('APP_URL', 'http://localhost'),
+
+    'erp_connection_mode' => env('ERP_CONNECTION_MODE', 'api'),
+    'erp_api_url' => env('ERP_API_URL', 'https://citsur.suraki.net/api'),
+    'erp_api_token' => env('ERP_API_TOKEN', 'SurakiSecreto2026'),
 
     /*
     |--------------------------------------------------------------------------
@@ -124,4 +128,3 @@ return [
     ],
 
 ];
-

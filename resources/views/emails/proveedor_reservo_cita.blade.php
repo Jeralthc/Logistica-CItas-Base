@@ -54,7 +54,7 @@
             <p>Ya puede visualizar el estatus de esta recepción en su panel de monitoreo. Tenga en cuenta que el personal de recepción ya ha sido notificado sobre la llegada de este proveedor.</p>
         </div>
         <div class="footer">
-            <p>Sistema Logístico Empresa Base - Notificaciones Internas</p>
+            <p>Sistema Logístico Suraki - Notificaciones Internas</p>
         </div>
     </div>
 </body>

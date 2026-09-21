@@ -15,11 +15,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
+            \App\Http\Middleware\PreventBackHistory::class,
         ]);
 
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'erp.api' => \App\Http\Middleware\ErpApiMiddleware::class,
+            'modulo' => \App\Http\Middleware\CheckModuleAccess::class,
         ]);
 
         $middleware->append(\App\Http\Middleware\SecurityHeadersMiddleware::class);

@@ -22,7 +22,7 @@ class CitaFinalizada extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '¡Orden de Compra Recibida y Completada! - Empresa Base',
+            subject: '¡Orden de Compra Recibida y Completada! - Suraki',
         );
     }
 

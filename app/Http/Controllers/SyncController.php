@@ -33,13 +33,51 @@ class SyncController extends Controller
             
             foreach ($ordenes as $orden) {
                 $resumen = $orden['resumen'] ?? [];
+
+                $rawFechaEmision = $orden['fecha_emision'] 
+                    ?? $orden['fecha_odc'] 
+                    ?? $orden['fecha_orden']
+                    ?? $resumen['fecha_emision'] 
+                    ?? $resumen['Fecha_Emision'] 
+                    ?? $resumen['fecha_orden'] 
+                    ?? $resumen['fecha_odc'] 
+                    ?? null;
+
+                $cleanFechaEmision = $rawFechaEmision ? substr(trim($rawFechaEmision), 0, 10) : null;
+
+                $rawFechaRecepcion = $orden['fecha_recepcion'] 
+                    ?? $resumen['fecha_recepcion'] 
+                    ?? $resumen['Fecha_Recepcion'] 
+                    ?? null;
+
+                $cleanFechaRecepcion = $rawFechaRecepcion ? substr(trim($rawFechaRecepcion), 0, 10) : null;
+
+                $proveedorVal = $orden['proveedor'] 
+                    ?? $resumen['Nombre_Proveedor'] 
+                    ?? $resumen['proveedor'] 
+                    ?? $resumen['nombre_proveedor'] 
+                    ?? null;
+
+                $destinoVal = $orden['destino'] 
+                    ?? $resumen['sucursal_nombre'] 
+                    ?? $resumen['Muelle_Destino'] 
+                    ?? $resumen['destino'] 
+                    ?? null;
                 
+                $rifVal = $resumen['Codigo_Proveedor'] 
+                    ?? $resumen['c_rif'] 
+                    ?? $resumen['c_CODPROVEEDOR'] 
+                    ?? $resumen['c_codproveed'] 
+                    ?? ($orden['rif_proveedor'] ?? null);
+                $rifLimpio = $rifVal ? strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($rifVal))) : null;
+
                 $insertData[] = [
                     'numero_oc' => $orden['numero_oc'],
-                    'fecha_emision' => $orden['fecha_emision'] ?? null,
-                    'fecha_recepcion' => $orden['fecha_recepcion'] ?? null,
-                    'proveedor' => $orden['proveedor'] ?? null,
-                    'destino' => $orden['destino'] ?? null,
+                    'rif_proveedor' => $rifLimpio,
+                    'fecha_emision' => $cleanFechaEmision,
+                    'fecha_recepcion' => $cleanFechaRecepcion,
+                    'proveedor' => $proveedorVal,
+                    'destino' => $destinoVal,
                     'resumen_json' => json_encode($resumen),
                     'detalles_json' => json_encode($orden['detalles'] ?? []),
                     'categoria_sugerida' => \App\Services\AppointmentDurationService::detectarCategoria($resumen),
@@ -51,13 +89,15 @@ class SyncController extends Controller
             }
 
             // Insertamos (o actualizamos si ya existe)
-            // IMPORTANTE: NO actualizar 'estatus_habilitacion' ni 'resumen_json' si ya existe para no borrar el RIF insertado
+            // IMPORTANTE: NO sobrescribir 'estatus_habilitacion' si ya fue habilitada
             foreach (array_chunk($insertData, 100) as $chunk) {
                 DB::table('erp_ordenes_sync')->upsert($chunk, ['numero_oc'], [
+                    'rif_proveedor',
                     'fecha_emision', 
                     'fecha_recepcion', 
                     'proveedor', 
                     'destino', 
+                    'resumen_json',
                     'detalles_json',
                     'categoria_sugerida',
                     'peso_estimado_ton',

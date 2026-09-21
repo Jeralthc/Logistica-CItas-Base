@@ -38,6 +38,12 @@ class RegisteredUserController extends Controller
         $request->validate([
             'username' => ['required', 'string', 'max:255'],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ], [
+            'username.required' => 'El RIF es obligatorio.',
+            'username.string' => 'El RIF debe ser una cadena de texto.',
+            'username.max' => 'El RIF no debe exceder los 255 caracteres.',
+            'password.required' => 'La contraseña es obligatoria.',
+            'password.confirmed' => 'Las contraseñas no coinciden.',
         ]);
 
         $user = User::where('username', $request->username)->first();
@@ -93,6 +99,17 @@ class RegisteredUserController extends Controller
             'email' => 'nullable|string|lowercase|email|max:255',
             'cargo' => 'required|string|in:comprador,receptor,proveedor',
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+        ], [
+            'name.required' => 'El nombre es obligatorio.',
+            'name.string' => 'El nombre debe ser texto.',
+            'name.max' => 'El nombre no debe exceder los 255 caracteres.',
+            'username.required' => 'El usuario o RIF es obligatorio.',
+            'username.unique' => 'Este usuario o RIF ya se encuentra registrado.',
+            'email.email' => 'El correo electrónico no es válido.',
+            'cargo.required' => 'Debe seleccionar un cargo.',
+            'cargo.in' => 'El cargo seleccionado no es válido.',
+            'password.required' => 'La contraseña es obligatoria.',
+            'password.confirmed' => 'Las contraseñas no coinciden.',
         ]);
 
         $user = User::create([

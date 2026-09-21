@@ -22,7 +22,7 @@ class ProveedorReservoCita extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '¡Proveedor ha reservado su cita! - Empresa Base',
+            subject: '¡Proveedor ha reservado su cita! - Suraki',
         );
     }
 

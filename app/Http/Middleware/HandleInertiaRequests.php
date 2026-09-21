@@ -34,6 +34,7 @@ class HandleInertiaRequests extends Middleware
             'auth' => [
                 'user' => $request->user(),
             ],
+            'vapidPublicKey' => config('webpush.vapid.public_key') ?: env('VAPID_PUBLIC_KEY', 'BIreKgF_4XxbavEskkMWHsp65fBN233Wb0yfinIghrgrXbk6YOpMmnBPBMg29wVyL0J-SGj0GOSuX05abQE-OwA'),
         ];
     }
 }

@@ -1,6 +1,6 @@
 <?php
 // Script de reparación: Crear carpetas de storage necesarias para Laravel
-// Subir a public_html/ y abrir en el navegador: https://citsur.Empresa Base.net/fix_storage.php
+// Subir a public_html/ y abrir en el navegador: https://citsur.suraki.net/fix_storage.php
 // Se autodestruye después de ejecutarse.
 
 $base = __DIR__ . '/../storage';

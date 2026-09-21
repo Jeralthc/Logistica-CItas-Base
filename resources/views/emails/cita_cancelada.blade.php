@@ -57,7 +57,7 @@
         </div>
         <div class="footer">
             <p>Este es un correo automático, por favor no respondas a esta dirección.</p>
-            <p>&copy; {{ date('Y') }} Logística Empresa Base. Todos los derechos reservados.</p>
+            <p>&copy; {{ date('Y') }} Logística Suraki. Todos los derechos reservados.</p>
         </div>
     </div>
 </body>

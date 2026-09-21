@@ -1,6 +1,6 @@
 <?php
 // REPARADOR TOTAL - Escribe directamente todas las vistas Blade faltantes
-// Sube a public_html/ y abre: https://citsur.Empresa Base.net/fix_views.php
+// Sube a public_html/ y abre: https://citsur.suraki.net/fix_views.php
 $root = realpath(__DIR__ . '/..');
 
 $dirs = [
@@ -116,7 +116,7 @@ if (!file_exists($f)) {
                 </div>
                 @php
                     $sucursalesMap = [
-                        \'0101\' => \'Tu Empresa\',
+                        \'0101\' => \'Hipersuraki\',
                         \'0102\' => \'Depósito General\',
                         \'0111\' => \'Producción\',
                         \'0115\' => \'Insumos\',
@@ -138,7 +138,7 @@ if (!file_exists($f)) {
         </div>
         <div class="footer">
             <p>Este es un correo automático, por favor no respondas a esta dirección.</p>
-            <p>&copy; {{ date(\'Y\') }} Logística Empresa Base. Todos los derechos reservados.</p>
+            <p>&copy; {{ date(\'Y\') }} Logística Suraki. Todos los derechos reservados.</p>
         </div>
     </div>
 </body>
@@ -209,7 +209,7 @@ if (!file_exists($f)) {
         </div>
         <div class="footer">
             <p>Este es un correo automático, por favor no respondas a esta dirección.</p>
-            <p>&copy; {{ date(\'Y\') }} Logística Empresa Base. Todos los derechos reservados.</p>
+            <p>&copy; {{ date(\'Y\') }} Logística Suraki. Todos los derechos reservados.</p>
         </div>
     </div>
 </body>
@@ -281,7 +281,7 @@ if (!file_exists($f)) {
                 </div>
                 @php
                     $sucursalesMap = [
-                        \'0101\' => \'Tu Empresa\',
+                        \'0101\' => \'Hipersuraki\',
                         \'0102\' => \'Depósito General\',
                         \'0111\' => \'Producción\',
                         \'0115\' => \'Insumos\',
@@ -308,7 +308,7 @@ if (!file_exists($f)) {
         </div>
         <div class="footer">
             <p>Este es un correo automático, por favor no respondas a esta dirección.</p>
-            <p>&copy; {{ date(\'Y\') }} Logística Empresa Base. Todos los derechos reservados.</p>
+            <p>&copy; {{ date(\'Y\') }} Logística Suraki. Todos los derechos reservados.</p>
         </div>
     </div>
 </body>
@@ -325,7 +325,7 @@ if (!file_exists($f)) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mantenimiento - Logística Empresa Base</title>
+    <title>Mantenimiento - Logística Suraki</title>
     <meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\' https://fonts.googleapis.com; font-src \'self\' https://fonts.gstatic.com;">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

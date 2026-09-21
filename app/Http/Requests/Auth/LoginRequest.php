@@ -6,6 +6,7 @@ use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -40,13 +41,58 @@ class LoginRequest extends FormRequest
      */
     public function authenticate(): void
     {
-        $this->ensureIsNotRateLimited();
+        $loginInput = $this->input('username');
+        $password = $this->input('password');
+        $remember = $this->boolean('remember');
+        $loginClean = strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($loginInput)));
 
-        if (! Auth::attempt($this->only('username', 'password'), $this->boolean('remember'))) {
+        $authenticated = Auth::attempt(['username' => $loginInput, 'password' => $password], $remember)
+                      || Auth::attempt(['email' => $loginInput, 'password' => $password], $remember)
+                      || Auth::attempt(['rif' => $loginInput, 'password' => $password], $remember)
+                      || Auth::attempt(['rif' => $loginClean, 'password' => $password], $remember);
+
+        if (!$authenticated && !empty($loginClean)) {
+            // Intentar auto-provisionar proveedor si tiene ODC habilitada
+            $hasSync = \Illuminate\Support\Facades\DB::table('erp_ordenes_sync')
+                ->where('estatus_habilitacion', 'habilitada')
+                ->where(function($q) use ($loginClean) {
+                    $q->where('rif_proveedor', 'like', "%{$loginClean}%")
+                      ->orWhere('resumen_json', 'like', "%{$loginClean}%");
+                })->first();
+
+            if ($hasSync) {
+                $existingUser = \App\Models\User::where('username', $loginClean)->orWhere('rif', $loginClean)->first();
+                if (!$existingUser) {
+                    \App\Models\User::create([
+                        'name' => $hasSync->proveedor ?: 'Proveedor ' . $loginClean,
+                        'username' => $loginClean,
+                        'rif' => $loginClean,
+                        'email' => strtolower($loginClean) . '@proveedor.suraki.net',
+                        'role' => 'proveedor',
+                        'password' => \Illuminate\Support\Facades\Hash::make($password ?: $loginClean),
+                    ]);
+                    $authenticated = Auth::attempt(['username' => $loginClean, 'password' => $password], $remember)
+                                  || Auth::attempt(['username' => $loginClean, 'password' => $loginClean], $remember);
+                }
+            }
+        }
+
+        if (! $authenticated) {
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
-                'username' => trans('auth.failed'),
+                'username' => 'Estas credenciales no coinciden con nuestros registros.',
+            ]);
+        }
+
+        // Verificar si la cuenta está activa
+        $user = Auth::user();
+        if ($user && isset($user->activo) && !$user->activo) {
+            Auth::logout();
+            RateLimiter::hit($this->throttleKey());
+
+            throw ValidationException::withMessages([
+                'username' => 'Su cuenta se encuentra desactivada. Contacte al administrador del sistema.',
             ]);
         }
 
@@ -69,10 +115,7 @@ class LoginRequest extends FormRequest
         $seconds = RateLimiter::availableIn($this->throttleKey());
 
         throw ValidationException::withMessages([
-            'username' => trans('auth.throttle', [
-                'seconds' => $seconds,
-                'minutes' => ceil($seconds / 60),
-            ]),
+            'username' => 'Demasiados intentos de acceso. Por favor intente nuevamente en ' . $seconds . ' segundos.',
         ]);
     }
 

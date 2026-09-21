@@ -15,36 +15,105 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
+    $user = auth()->user();
+    if ($user && $user->role === 'comprador') {
+        return redirect()->route('monitor-odc');
+    }
     return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified', 'role:receptor,admin,proveedor'])->name('dashboard');
+})->middleware(['auth', 'verified', 'role:receptor,admin,proveedor,comprador', 'modulo:recepcion'])->name('dashboard');
 
 Route::get('/operarios', function () {
     return Inertia::render('Operarios');
-})->middleware(['auth', 'verified', 'role:receptor,admin'])->name('operarios');
+})->middleware(['auth', 'verified', 'role:receptor,admin', 'modulo:operarios'])->name('operarios');
 
 Route::get('/reservar-cita', function () {
     return Inertia::render('ReservarCita');
-})->name('reservar-cita');
+})->middleware(['modulo:reservar_cita'])->name('reservar-cita');
+
+// Descarga directa y visualización de manuales con nombre y cabeceras oficiales
+Route::get('/descargar-manual', function () {
+    $path = public_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    if (!file_exists($path)) {
+        $path = base_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    }
+    if (!file_exists($path)) {
+        abort(404, 'Manual en PDF no encontrado en el servidor.');
+    }
+    return response()->file($path, [
+        'Content-Type' => 'application/pdf',
+        'Content-Disposition' => 'inline; filename="Manual_Usuario_Portal_Proveedor_CITSUR.pdf"',
+    ]);
+})->name('manual.pdf');
+
+Route::get('/Manual_Usuario_Portal_Proveedor_CITSUR.pdf', function () {
+    $path = public_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    if (!file_exists($path)) {
+        $path = base_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    }
+    if (!file_exists($path)) {
+        abort(404, 'Manual en PDF no encontrado en el servidor.');
+    }
+    return response()->file($path, [
+        'Content-Type' => 'application/pdf',
+        'Content-Disposition' => 'inline; filename="Manual_Usuario_Portal_Proveedor_CITSUR.pdf"',
+    ]);
+});
+
+Route::get('/manual-usuario', function () {
+    $path = public_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    if (!file_exists($path)) {
+        $path = base_path('Manual_Usuario_Portal_Proveedor_CITSUR.pdf');
+    }
+    if (!file_exists($path)) {
+        abort(404, 'Manual en PDF no encontrado en el servidor.');
+    }
+    return response()->file($path, [
+        'Content-Type' => 'application/pdf',
+        'Content-Disposition' => 'inline; filename="Manual_Usuario_Portal_Proveedor_CITSUR.pdf"',
+    ]);
+})->name('manual.ver');
+
+Route::get('/descargar-manual-word', function () {
+    $path = public_path('Manual_Usuario_Portal_Proveedor_CITSUR.docx');
+    if (!file_exists($path)) {
+        $path = base_path('Manual_Usuario_Portal_Proveedor_CITSUR.docx');
+    }
+    if (!file_exists($path)) {
+        abort(404, 'Manual en Word no encontrado en el servidor.');
+    }
+    return response()->download($path, 'Manual_Usuario_Portal_Proveedor_CITSUR.docx', [
+        'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition' => 'attachment; filename="Manual_Usuario_Portal_Proveedor_CITSUR.docx"',
+    ]);
+})->name('manual.word');
 
 Route::get('/monitor-odc', function () {
     return Inertia::render('MonitorOdc');
-})->middleware(['auth', 'verified', 'role:receptor,admin'])->name('monitor-odc');
+})->middleware(['auth', 'verified', 'role:receptor,admin,comprador', 'modulo:monitor_odc'])->name('monitor-odc');
 
-Route::get('/auditoria', [\App\Http\Controllers\AuditController::class, 'index'])
-    ->middleware(['auth', 'verified', 'role:admin'])
+Route::get('/monitoreo', [\App\Http\Controllers\MonitoringController::class, 'index'])
+    ->middleware(['auth', 'verified', 'role:admin,comprador', 'modulo:monitoreo'])
+    ->name('monitoreo');
+
+Route::get('/auditoria', [\App\Http\Controllers\MonitoringController::class, 'index'])
+    ->middleware(['auth', 'verified', 'role:admin', 'modulo:monitoreo'])
     ->name('auditoria');
 
 Route::get('/despliegue', function () {
     return Inertia::render('Despliegue');
-})->middleware(['auth', 'verified', 'role:admin'])->name('despliegue');
+})->middleware(['auth', 'verified', 'role:admin', 'modulo:despliegue'])->name('despliegue');
 
 Route::get('/configuracion-erp', function () {
     return Inertia::render('ConfiguracionERP');
-})->middleware(['auth', 'verified', 'role:admin'])->name('configuracion-erp');
+})->middleware(['auth', 'verified', 'role:admin', 'modulo:configuracion_erp'])->name('configuracion-erp');
 
 Route::get('/categorias', function () {
     return Inertia::render('Categorias');
-})->middleware(['auth', 'verified', 'role:admin'])->name('categorias');
+})->middleware(['auth', 'verified', 'role:admin', 'modulo:categorias'])->name('categorias');
+
+Route::get('/usuarios', function () {
+    return Inertia::render('Usuarios');
+})->middleware(['auth', 'verified', 'role:admin', 'modulo:usuarios'])->name('usuarios');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -184,3 +253,62 @@ Route::get('/reset-sistema', function () {
         ], 500);
     }
 });
+
+// Ruta para instalar paquete de notificaciones push y generar claves VAPID
+Route::get('/post-deploy-webpush', function () {
+    $outputs = [];
+
+    // 1. Ejecutar migraciones pendientes (crea tabla push_subscriptions)
+    try {
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+        $outputs[] = '✅ Migraciones ejecutadas: ' . trim(\Illuminate\Support\Facades\Artisan::output());
+    } catch (\Exception $e) {
+        $outputs[] = '⚠️ Migraciones: ' . $e->getMessage();
+    }
+
+    // 2. Instalar el paquete de webpush via composer (si no está instalado)
+    if (!class_exists(\NotificationChannels\WebPush\WebPushChannel::class)) {
+        try {
+            $composerPath = 'composer';
+            // Intentar localizar composer
+            if (file_exists(base_path('composer.phar'))) {
+                $composerPath = PHP_BINARY . ' ' . base_path('composer.phar');
+            }
+
+            $command = "cd " . base_path() . " && {$composerPath} require laravel-notification-channels/webpush --no-interaction --no-dev --optimize-autoloader 2>&1";
+            $result = shell_exec($command);
+            $outputs[] = '📦 Composer require: ' . ($result ?: 'Ejecutado (sin salida)');
+        } catch (\Exception $e) {
+            $outputs[] = '❌ Error instalando paquete: ' . $e->getMessage();
+        }
+    } else {
+        $outputs[] = '✅ Paquete webpush ya está instalado.';
+    }
+
+    // 3. Generar claves VAPID si no existen
+    if (empty(env('VAPID_PUBLIC_KEY'))) {
+        try {
+            \Illuminate\Support\Facades\Artisan::call('webpush:vapid');
+            $outputs[] = '🔑 Claves VAPID generadas: ' . trim(\Illuminate\Support\Facades\Artisan::output());
+        } catch (\Exception $e) {
+            $outputs[] = '⚠️ VAPID: ' . $e->getMessage() . ' (Genérelas manualmente con: php artisan webpush:vapid)';
+        }
+    } else {
+        $outputs[] = '✅ Claves VAPID ya configuradas.';
+    }
+
+    // 4. Limpiar cachés
+    try {
+        \Illuminate\Support\Facades\Artisan::call('optimize:clear');
+        $outputs[] = '🧹 Cachés limpiadas.';
+    } catch (\Exception $e) {
+        $outputs[] = '⚠️ Cache: ' . $e->getMessage();
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => '¡Proceso de instalación de Web Push completado!',
+        'steps' => $outputs
+    ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+});
+

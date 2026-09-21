@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use App\Models\User;
 use App\Models\Operario;
+use App\Mail\NotificacionReactivacionOdc;
 use Carbon\Carbon;
 
 class CitaController extends Controller
@@ -14,6 +15,27 @@ class CitaController extends Controller
     public function __construct()
     {
         Carbon::setLocale('es');
+    }
+
+    /**
+     * Retorna el grupo de muelles/sucursales equivalentes que comparten la misma recepción física.
+     * Ej: 0101 (Piso de Venta) y 0102 (Depósito General) están ambos en Hiper Suraki y descargan en el mismo muelle.
+     */
+    public static function getMuellesEquivalentes($muelle)
+    {
+        $grupos = [
+            'hiper' => ['0101', '0102'],
+            'perecederos' => ['0140', '0141', '0150'],
+            'andinka' => ['0160', '0161'],
+        ];
+
+        foreach ($grupos as $grupo) {
+            if (in_array($muelle, $grupo)) {
+                return $grupo;
+            }
+        }
+
+        return [$muelle];
     }
 
     /**
@@ -25,31 +47,56 @@ class CitaController extends Controller
         $fecha = $request->input('fecha', Carbon::today()->format('Y-m-d'));
         $duracionMinutos = (int) $request->input('duracion', 60);
         $sucursal = $request->input('sucursal', '0101'); // Por defecto Hiper
+        $tipoOperacion = $request->input('tipo_operacion', 'proveedor'); // 'proveedor' o 'traslado_interno'
+
+        // Si el usuario autenticado es un galpón o Alfonso, forzar traslado interno
+        $authUser = auth('web')->user();
+        if ($authUser && ($authUser->es_galpon || $authUser->username === 'GALPON.ALFONSO')) {
+            $tipoOperacion = 'traslado_interno';
+        }
+
+        // Regla: Traslado Interno -> 2 horas máximo (120 minutos)
+        if ($tipoOperacion === 'traslado_interno' && $duracionMinutos > 120) {
+            $duracionMinutos = 120;
+        }
 
         // Horario laboral
         $horaInicio = 8;  // 8:00 AM
         $horaFin = 18;    // 6:00 PM (última reservación)
         $intervalo = 30;  // slots cada 30 minutos
 
-        // Obtener citas ya reservadas para esa fecha
-        $citasExistentes = DB::table('appointments')
+        // Obtener citas ya reservadas para esa fecha (excluyendo la cita que se esté reprogramando si aplica)
+        $citasQuery = DB::table('appointments')
             ->whereDate('fecha_cita', $fecha)
-            ->whereIn('estatus', ['programada', 'en muelle'])
-            ->select('fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos')
+            ->whereIn('estatus', ['programada', 'en muelle']);
+
+        if ($request->filled('cita_id')) {
+            $citasQuery->where('id', '!=', $request->input('cita_id'));
+        }
+
+        $citasExistentes = $citasQuery->select('id', 'fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos')
             ->get();
 
         // Mapeo Real de Muelles por Sucursal (Fase 6)
-        // El usuario indica usar números para los muelles
         $configMuelles = [
-            '0101' => ['0101'], // TU EMPRESA
+            '0101' => ['0101'], // Hiper Suraki
             '0102' => ['0102'], // Deposito Gral
             '0111' => ['0111'], // Produccion
             '0115' => ['0115'], // Insumos
+            '0140' => ['0140'], // Carnes y Perecederos
+            '0141' => ['0141'], // Carnes y Perecederos
+            '0150' => ['0150'], // Depósito Perecederos
+            '0160' => ['0160'], // Andinka
             '0161' => ['0161'], // Andinka
+            '0171' => ['0171'], // Sucursales
             '0180' => ['01', '02', '03', '04'], // Galpón Central
         ];
 
         $muelles = $configMuelles[$sucursal] ?? [$sucursal]; // Fallback usa el código de sucursal
+
+        $carbonFecha = Carbon::parse($fecha);
+        $esMiercoles = ($carbonFecha->dayOfWeek === Carbon::WEDNESDAY);
+        $esSabado = ($carbonFecha->dayOfWeek === Carbon::SATURDAY);
 
         $slots = [];
         for ($h = $horaInicio; $h < $horaFin; $h++) {
@@ -62,46 +109,83 @@ class CitaController extends Controller
                 $limiteLaboral = Carbon::parse("$fecha 19:00");
                 if ($slotFin->gt($limiteLaboral)) continue;
 
+                // Verificación de bloqueos de horario (Hoja manuscrita y reglas de recepción)
+                $bloqueadoPorHorario = false;
+                $motivoBloqueo = null;
+
+                if ($tipoOperacion !== 'traslado_interno') {
+                    // 1. Sábado Bloqueado para Proveedores
+                    if ($esSabado) {
+                        $bloqueadoPorHorario = true;
+                        $motivoBloqueo = 'Sábados bloqueados para recepción de proveedores.';
+                    }
+                    // 2. Miércoles: Proveedores hasta 11 AM (Después BLOQUEADO)
+                    elseif ($esMiercoles && $h >= 11) {
+                        $bloqueadoPorHorario = true;
+                        $motivoBloqueo = 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.';
+                    }
+                } else {
+                    // 3. Galpones / Traslado Interno: Miércoles a partir de las 2:00 PM (14:00)
+                    // Las horas de la mañana hasta la 1:59 PM quedan bloqueadas
+                    if ($esMiercoles && $h < 14) {
+                        $bloqueadoPorHorario = true;
+                        $motivoBloqueo = 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.';
+                    }
+                }
+
                 // Ver qué muelles están libres en ese slot
                 $muellesOcupados = [];
                 foreach ($citasExistentes as $cita) {
                     $citaInicio = Carbon::parse($cita->fecha_cita);
-                    // Usar la duración real guardada en BD (Fase 6)
                     $duracionReal = $cita->duracion_minutos ?? $duracionMinutos;
                     $citaFin = $citaInicio->copy()->addMinutes((int) $duracionReal);
 
                     // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
                     if ($slotInicio->lt($citaFin) && $slotFin->gt($citaInicio)) {
                         $muellesOcupados[] = $cita->muelle_asignado;
+                        // Si la cita ocupa un muelle que comparte recepción física (ej: 0102 y 0101 en Hiper Suraki),
+                        // también ocupa todos los muelles equivalentes de esa misma sede física.
+                        $equiv = self::getMuellesEquivalentes($cita->muelle_asignado);
+                        foreach ($equiv as $eq) {
+                            $muellesOcupados[] = $eq;
+                        }
                     }
                 }
 
                 $muellesLibres = array_values(array_diff($muelles, $muellesOcupados));
+                $disponible = !$bloqueadoPorHorario && count($muellesLibres) > 0;
 
                 $slots[] = [
                     'hora' => $horaStr,
                     'hora_formato' => $slotInicio->format('h:i A'),
                     'hora_fin' => $slotFin->format('h:i A'),
-                    'disponible' => count($muellesLibres) > 0,
+                    'disponible' => $disponible,
+                    'bloqueado_horario' => $bloqueadoPorHorario,
+                    'motivo_bloqueo' => $motivoBloqueo,
                     'muelles_libres' => count($muellesLibres),
                     'muelles' => $muellesLibres,
                 ];
             }
         }
 
-        // Fechas disponibles (próximos 7 días, excluyendo domingos)
+        // Fechas disponibles (próximos días hábiles)
+        // Regla: Excluir domingos siempre.
+        // Regla: Sábado bloqueado para proveedores externos.
         $fechasDisponibles = [];
-        for ($i = 0; $i < 10; $i++) {
+        for ($i = 0; $i < 14; $i++) {
             $d = Carbon::today()->addDays($i);
-            if ($d->dayOfWeek !== Carbon::SUNDAY) {
-                $fechasDisponibles[] = [
-                    'fecha' => $d->format('Y-m-d'),
-                    'dia' => $d->isoFormat('ddd'),
-                    'dia_largo' => $d->isoFormat('dddd D [de] MMMM'),
-                    'es_hoy' => $d->isToday(),
-                ];
-                if (count($fechasDisponibles) >= 7) break;
-            }
+            if ($d->dayOfWeek === Carbon::SUNDAY) continue;
+            if ($tipoOperacion !== 'traslado_interno' && $d->dayOfWeek === Carbon::SATURDAY) continue;
+
+            $fechasDisponibles[] = [
+                'fecha' => $d->format('Y-m-d'),
+                'dia' => $d->isoFormat('ddd'),
+                'dia_largo' => $d->isoFormat('dddd D [de] MMMM'),
+                'es_hoy' => $d->isToday(),
+                'es_miercoles' => $d->dayOfWeek === Carbon::WEDNESDAY,
+                'es_sabado' => $d->dayOfWeek === Carbon::SATURDAY,
+            ];
+            if (count($fechasDisponibles) >= 7) break;
         }
 
         return response()->json([
@@ -109,6 +193,7 @@ class CitaController extends Controller
             'slots' => $slots,
             'fechas_disponibles' => $fechasDisponibles,
             'duracion_minutos' => $duracionMinutos,
+            'tipo_operacion' => $tipoOperacion,
         ]);
     }
 
@@ -117,24 +202,58 @@ class CitaController extends Controller
      */
     public function reservar(Request $request)
     {
-        $validated = $request->validate([
-            'numero_oc' => 'required|string',
-            'proveedor' => 'required|string',
-            'rif_proveedor' => 'nullable|string',
-            'fecha_cita' => 'required|date',
-            'muelle_asignado' => 'required|string',
-            'duracion_minutos' => 'required|integer', // Nueva validación
-            'observaciones' => 'nullable|string',
-        ]);
-        
-        // Fase 3 (Hardening): Sanitización de entradas contra XSS
-        $validated['observaciones'] = !empty($validated['observaciones']) ? strip_tags($validated['observaciones']) : null;
+        $isTrasladoInterno = $request->boolean('es_traslado_interno');
+        $authUser = auth('web')->user();
+        if ($authUser && ($authUser->es_galpon || $authUser->username === 'GALPON.ALFONSO')) {
+            $isTrasladoInterno = true;
+        }
+
+        if ($isTrasladoInterno) {
+            // Regla: Traslado Interno -> 2 horas máximo (120 minutos)
+            $duracion = (int) $request->input('duracion_minutos', 60);
+            if ($duracion > 120) {
+                $duracion = 120;
+            }
+
+            // Generar o sanitizar código de Traslado Interno
+            $numTraslado = trim($request->input('numero_oc', ''));
+            if (empty($numTraslado)) {
+                $numTraslado = 'TI-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -4));
+            } elseif (!str_starts_with(strtoupper($numTraslado), 'TI-')) {
+                $numTraslado = 'TI-' . strtoupper($numTraslado);
+            }
+
+            $galponOrigen = trim($request->input('galpon_origen', '')) ?: 'GALPÓN ALFONSO';
+            $nombreProveedor = "{$galponOrigen} (TRASLADO INTERNO)";
+            $rifProveedor = $request->input('rif_proveedor') ?: 'J-10715201';
+
+            $validated = [
+                'numero_oc' => $numTraslado,
+                'proveedor' => $nombreProveedor,
+                'rif_proveedor' => $rifProveedor,
+                'fecha_cita' => $request->input('fecha_cita'),
+                'muelle_asignado' => $request->input('muelle_asignado'),
+                'duracion_minutos' => $duracion,
+                'observaciones' => !empty($request->input('observaciones')) ? strip_tags($request->input('observaciones')) : 'Traslado Interno de Galpón',
+            ];
+        } else {
+            $validated = $request->validate([
+                'numero_oc' => 'required|string',
+                'proveedor' => 'required|string',
+                'rif_proveedor' => 'nullable|string',
+                'fecha_cita' => 'required|date',
+                'muelle_asignado' => 'required|string',
+                'duracion_minutos' => 'required|integer',
+                'observaciones' => 'nullable|string',
+            ]);
+            $validated['observaciones'] = !empty($validated['observaciones']) ? strip_tags($validated['observaciones']) : null;
+            $duracion = $validated['duracion_minutos'];
+        }
 
         $fechaCita = Carbon::parse($validated['fecha_cita']);
-        $duracion = $validated['duracion_minutos'];
         $fechaFin = $fechaCita->copy()->addMinutes((int) $duracion);
 
-        // Validar horario
+        // Validar horario general
         if ($fechaCita->hour < 8 || $fechaCita->hour >= 18) {
             return response()->json(['error' => 'El horario de reservación es de 8:00 AM a 6:00 PM.'], 422);
         }
@@ -144,9 +263,25 @@ class CitaController extends Controller
             return response()->json(['error' => 'No se reciben reservaciones los domingos.'], 422);
         }
 
-        // Verificar que el muelle esté libre (Rango)
+        // Validar bloqueos según tipo de operación
+        if (!$isTrasladoInterno) {
+            if ($fechaCita->dayOfWeek === Carbon::SATURDAY) {
+                return response()->json(['error' => 'Los sábados están bloqueados para recepción de proveedores.'], 422);
+            }
+            if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
+                return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
+            }
+        } else {
+            // Galpones: Miércoles únicamente a partir de las 2:00 PM (14:00)
+            if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour < 14) {
+                return response()->json(['error' => 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.'], 422);
+            }
+        }
+
+        // Verificar que el muelle esté libre (Rango) considerando muelles equivalentes de la misma sede física
+        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
         $citasExistentes = DB::table('appointments')
-            ->where('muelle_asignado', $validated['muelle_asignado'])
+            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -157,7 +292,7 @@ class CitaController extends Controller
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A')], 422);
+                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})"], 422);
             }
         }
 
@@ -168,7 +303,7 @@ class CitaController extends Controller
             ->first();
 
         if ($citaExistente) {
-            return response()->json(['error' => 'Esta orden ya tiene una cita programada.'], 422);
+            return response()->json(['error' => 'Esta orden o traslado ya tiene una cita programada.'], 422);
         }
 
         $id = DB::table('appointments')->insertGetId([
@@ -179,6 +314,9 @@ class CitaController extends Controller
             'muelle_asignado' => $validated['muelle_asignado'],
             'duracion_minutos' => $duracion,
             'estatus' => 'programada',
+            'es_traslado_interno' => $isTrasladoInterno,
+            'galpon_origen' => $isTrasladoInterno ? ($validated['galpon_origen'] ?? 'GALPÓN ALFONSO') : null,
+            'tipo_mercancia' => $isTrasladoInterno ? 'traslado_interno' : null,
             'user_id' => auth('web')->id() ?? 1,
             'observaciones' => $validated['observaciones'] ?? null,
             'created_at' => now(),
@@ -197,7 +335,7 @@ class CitaController extends Controller
         // Registrar en Bitácora Global
         \App\Services\AuditLogger::log(
             module: 'Citas',
-            action: 'Agendar Cita',
+            action: $isTrasladoInterno ? 'Agendar Traslado Interno' : 'Agendar Cita',
             motive: 'Programación inicial',
             auditableType: 'Appointment',
             auditableId: $id,
@@ -210,13 +348,50 @@ class CitaController extends Controller
             'numero_oc' => $validated['numero_oc'],
             'proveedor' => $validated['proveedor'],
             'tipo' => 'nueva_cita',
-            'fecha_oc' => now(), // fecha de registro de la cita
+            'fecha_oc' => now(),
             'fecha_recepcion' => $fechaCita,
-            'status_erp' => 'CITA', // Indicador local
+            'status_erp' => $isTrasladoInterno ? 'TRASLADO' : 'CITA',
         ]);
 
-        // Ahora NUNCA enviamos el correo aquí. Siempre pasamos por el paso D (registrarProveedor) 
-        // para que elijan o agreguen un vendedor/contacto y asociarlo.
+        if ($isTrasladoInterno) {
+            return response()->json([
+                'message' => 'Traslado interno agendado exitosamente.',
+                'proveedor_registrado' => true,
+                'contactos' => [],
+                'cita' => [
+                    'id' => $id,
+                    'numero_oc' => $validated['numero_oc'],
+                    'fecha' => $fechaCita->isoFormat('dddd D [de] MMMM [de] YYYY'),
+                    'hora' => $fechaCita->format('h:i A'),
+                    'hora_fin' => $fechaFin->format('h:i A'),
+                    'muelle' => $validated['muelle_asignado'],
+                    'duracion_minutos' => $duracion,
+                    'es_traslado_interno' => true,
+                ],
+            ], 201);
+        }
+
+        // Enviar Push Notification (defensivo)
+        try {
+            $receptores = \App\Models\User::whereIn('role', ['receptor', 'admin'])->get();
+            $comprador = null;
+            $syncRow = DB::table('erp_ordenes_sync')->where('numero_oc', $validated['numero_oc'])->first();
+            if ($syncRow && $syncRow->habilitada_por_user_id) {
+                $comprador = \App\Models\User::find($syncRow->habilitada_por_user_id);
+                if ($comprador && !$receptores->contains('id', $comprador->id)) {
+                    $receptores->push($comprador);
+                }
+            }
+            \Illuminate\Support\Facades\Notification::send($receptores, new \App\Notifications\PushNotification(
+                'Nueva Cita Programada', 
+                "{$validated['proveedor']} ha agendado cita para la orden {$validated['numero_oc']} el " . $fechaCita->format('d/m/Y h:i A'),
+                null,
+                '/dashboard'
+            ));
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Push notification no enviada (reservar): ' . $e->getMessage());
+        }
+
         $proveedorRegistrado = false;
         $contactos = [];
         if (!empty($validated['rif_proveedor'])) {
@@ -285,10 +460,25 @@ class CitaController extends Controller
             return response()->json(['error' => 'No se reciben reservaciones los domingos.'], 422);
         }
 
-        // Verificar que el muelle esté libre (Rango), excluyendo la cita actual
+        $isTrasladoInterno = filter_var($cita->es_traslado_interno ?? false, FILTER_VALIDATE_BOOLEAN) || str_starts_with($cita->numero_oc ?? '', 'TI-');
+        if (!$isTrasladoInterno) {
+            if ($fechaCita->dayOfWeek === Carbon::SATURDAY) {
+                return response()->json(['error' => 'Los sábados están bloqueados para recepción de proveedores.'], 422);
+            }
+            if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
+                return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
+            }
+        } else {
+            if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour < 14) {
+                return response()->json(['error' => 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.'], 422);
+            }
+        }
+
+        // Verificar que el muelle esté libre (Rango), excluyendo la cita actual y considerando muelles equivalentes
+        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
         $citasExistentes = DB::table('appointments')
             ->where('id', '!=', $id)
-            ->where('muelle_asignado', $validated['muelle_asignado'])
+            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -299,7 +489,7 @@ class CitaController extends Controller
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A')], 422);
+                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})"], 422);
             }
         }
 
@@ -335,6 +525,34 @@ class CitaController extends Controller
             'status_erp' => 'Reprogramada',
             'leida' => false,
         ]);
+
+        // Enviar Push Notification (defensivo)
+        try {
+            $usersToNotify = \App\Models\User::whereIn('role', ['admin', 'receptor'])->get();
+            if ($cita->user_id) {
+                $proveedorUser = \App\Models\User::find($cita->user_id);
+                if ($proveedorUser && !$usersToNotify->contains('id', $proveedorUser->id)) {
+                    $usersToNotify->push($proveedorUser);
+                }
+            }
+            $syncRow = DB::table('erp_ordenes_sync')->where('numero_oc', $cita->numero_oc)->first();
+            if ($syncRow && $syncRow->habilitada_por_user_id) {
+                $compradorUser = \App\Models\User::find($syncRow->habilitada_por_user_id);
+                if ($compradorUser && !$usersToNotify->contains('id', $compradorUser->id)) {
+                    $usersToNotify->push($compradorUser);
+                }
+            }
+            if ($usersToNotify->isNotEmpty()) {
+                \Illuminate\Support\Facades\Notification::send($usersToNotify, new \App\Notifications\PushNotification(
+                    'Cita Reprogramada',
+                    "La cita de la orden {$cita->numero_oc} ha sido reprogramada al " . $fechaCita->format('d/m/Y h:i A') . "\nMotivo: {$validated['motivo']}",
+                    null,
+                    '/dashboard'
+                ));
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Push notification no enviada (reprogramar): ' . $e->getMessage());
+        }
 
         // --- ENVIAR CORREO DE REPROGRAMACIÓN ---
         try {
@@ -409,8 +627,36 @@ class CitaController extends Controller
             return response()->json(['citas' => []]);
         }
 
+        $authUser = auth('web')->user();
+        $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+        if (!$isTestAuthorized) {
+            $query->where(function($q) {
+                $q->where('appointments.numero_oc', 'not like', 'TEST-%')
+                  ->where(function($sub) {
+                      $sub->whereNull('appointments.rif_proveedor')
+                          ->orWhereNotIn('appointments.rif_proveedor', ['J-999999999', 'J999999999']);
+                  });
+            });
+        }
+
         if (auth('web')->user()->role === 'proveedor') {
-            $query->where('appointments.rif_proveedor', auth('web')->user()->username);
+            $user = auth('web')->user();
+            $rawRif = $user->rif ?: $user->username;
+            $parts = explode('.', $rawRif);
+            $baseRif = strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($parts[0] ?? '')));
+
+            $isGalpon = $user->es_galpon || $user->username === 'GALPON.ALFONSO';
+
+            $query->where(function($q) use ($user, $baseRif, $isGalpon) {
+                $q->where('appointments.rif_proveedor', $user->username)
+                  ->orWhere('appointments.rif_proveedor', $user->rif)
+                  ->orWhere('appointments.rif_proveedor', 'LIKE', '%' . $baseRif . '%')
+                  ->orWhere('appointments.user_id', $user->id);
+                if ($isGalpon) {
+                    $q->orWhere('appointments.es_traslado_interno', true)
+                      ->orWhere('appointments.numero_oc', 'LIKE', 'TI-%');
+                }
+            });
         }
 
         $citas = $query->get();
@@ -418,37 +664,91 @@ class CitaController extends Controller
         $userRole = auth('web')->check() ? auth('web')->user()->role : 'guest';
 
         $citas = $citas->map(function ($cita) use ($userRole) {
+            $cita->es_traslado_interno = filter_var($cita->es_traslado_interno ?? false, FILTER_VALIDATE_BOOLEAN);
+
             $cita->bloqueado_para_comprador = \App\Models\SystemAuditLog::where('auditable_id', $cita->id)
                 ->where('auditable_type', 'Appointment')
                 ->where('user_role', 'receptor')
                 ->exists();
                 
-            // Buscar si la orden fue habilitada por un comprador para sobrescribir el Atendido Por
+            // Buscar el verdadero comprador de la orden (priorizando el ERP)
             $ordenLimpia = preg_replace('/^E/i', '', $cita->numero_oc);
-            $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
-            $ordenConE = 'E' . $ordenPad;
+            $ordenSinCeros = ltrim($ordenLimpia, '0');
+            $ordenPad = str_pad($ordenSinCeros, 9, '0', STR_PAD_LEFT);
+            $posiblesOcs = array_values(array_unique(array_filter([
+                $cita->numero_oc, 
+                $ordenLimpia, 
+                $ordenSinCeros, 
+                $ordenPad, 
+                'E' . $ordenSinCeros, 
+                'E' . $ordenPad
+            ])));
             
-            $compradorEncontrado = false;
-            
-            // Intentar primero desde erp_ordenes_sync
             $syncRow = DB::table('erp_ordenes_sync')
-                ->whereIn('numero_oc', [$cita->numero_oc, $ordenLimpia, $ordenPad, $ordenConE])
+                ->whereIn('numero_oc', $posiblesOcs)
+                ->orderBy('updated_at', 'desc')
                 ->first();
                 
-            if ($syncRow && $syncRow->habilitada_por_user_id) {
-                $comprador = DB::table('users')->where('id', $syncRow->habilitada_por_user_id)->first();
-                if ($comprador) {
-                    $cita->registrado_por_nombre = $comprador->name;
-                    $compradorEncontrado = true;
+            $cita->registrado_por_nombre = $this->resolverCompradorReal($cita->numero_oc, $syncRow, $cita);
+            
+            // Fecha en que hizo el envío el comprador
+            $emailLog = DB::table('email_logs')
+                ->whereIn('numero_oc', $posiblesOcs)
+                ->where('tipo_evento', 'odc_habilitada')
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            // Resolución robusta de la fecha en que el comprador envió/creó la orden:
+            // 1. Log de envío de correo de ODC habilitada
+            // 2. Si la orden fue habilitada en el sistema (habilitada o ya agendada con usuario comprador)
+            // 3. Fecha de emisión de la ODC en el ERP (fecha_emision o fecha_odc)
+            // 4. Fecha de sincronización o creación de la orden
+            $fechaEnvio = null;
+            if ($emailLog && !empty($emailLog->created_at)) {
+                $fechaEnvio = $emailLog->created_at;
+            } elseif ($syncRow) {
+                $fueHabilitada = in_array($syncRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRow->habilitada_por_user_id);
+                if ($fueHabilitada && !empty($syncRow->updated_at) && $syncRow->updated_at != $syncRow->created_at) {
+                    $fechaEnvio = $syncRow->updated_at;
+                } elseif (!empty($syncRow->fecha_emision)) {
+                    $fechaEnvio = $syncRow->fecha_emision;
+                } elseif (!empty($syncRow->created_at)) {
+                    $fechaEnvio = $syncRow->created_at;
                 }
             }
             
-            // Fallback: usar habilitada_por_user_id guardado directamente en la cita
-            if (!$compradorEncontrado && isset($cita->habilitada_por_user_id) && $cita->habilitada_por_user_id) {
-                $comprador = DB::table('users')->where('id', $cita->habilitada_por_user_id)->first();
-                if ($comprador) {
-                    $cita->registrado_por_nombre = $comprador->name;
+            // Si aún no se tiene fecha_envio, buscar en el resumen_json de la orden
+            if (!$fechaEnvio && $syncRow && !empty($syncRow->resumen_json)) {
+                $resumenObj = json_decode($syncRow->resumen_json, true);
+                if (is_array($resumenObj)) {
+                    $fechaEnvio = $resumenObj['fecha_odc'] ?? $resumenObj['Fecha_Emision'] ?? $resumenObj['fecha_emision'] ?? null;
                 }
+            }
+
+            // Fallback directo a atributos de la cita si existen
+            if (!$fechaEnvio) {
+                $fechaEnvio = $cita->fecha_odc ?? $cita->fecha_emision ?? null;
+            }
+
+            $cita->fecha_envio_comprador = $fechaEnvio;
+            
+            // Hora en que registró la cita el proveedor
+            $cita->fecha_registro_cita = $cita->created_at;
+
+            // Fecha y hora en que fue marcada como completada en muelle
+            if ($cita->estatus === 'finalizada') {
+                if (empty($cita->fecha_completada)) {
+                    $routeLog = DB::table('appointment_route_logs')
+                        ->where('numero_oc', $cita->numero_oc)
+                        ->where('estatus_nuevo', 'finalizada')
+                        ->orderBy('created_at', 'desc')
+                        ->first();
+                    $cita->fecha_completada = $routeLog ? $routeLog->created_at : $cita->updated_at;
+                    $cita->completada_por_nombre = $routeLog ? $routeLog->user_name : ($cita->completada_por_nombre ?? 'Recepción');
+                }
+            } else {
+                $cita->fecha_completada = null;
+                $cita->completada_por_nombre = null;
             }
             
             // Convertir factura_path a URL pública completa
@@ -475,7 +775,60 @@ class CitaController extends Controller
             return $cita;
         });
 
-        return response()->json(['citas' => $citas]);
+        $compradoresBase = collect([
+            ['id' => 176, 'name' => 'ALEJANDRO PEÑA'],
+            ['id' => 27,  'name' => 'KARYNELL ARAQUE'],
+            ['id' => 19,  'name' => 'Dugarte Yoliys'],
+            ['id' => 166, 'name' => 'MARIA JOSE CONTRERAS'],
+        ]);
+
+        $nombresEnCitas = $citas->pluck('registrado_por_nombre')->filter()->unique();
+        foreach ($nombresEnCitas as $idx => $nombreCita) {
+            if (!$compradoresBase->contains('name', $nombreCita)) {
+                $compradoresBase->push(['id' => 1000 + $idx, 'name' => $nombreCita]);
+            }
+        }
+
+        // Calcular contadores reales de activas y finalizadas
+        $countQuery = DB::table('appointments');
+        if (auth('web')->user()->role === 'proveedor') {
+            $user = auth('web')->user();
+            $rawRif = $user->rif ?: $user->username;
+            $parts = explode('.', $rawRif);
+            $baseRif = strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($parts[0] ?? '')));
+            $isGalpon = $user->es_galpon || $user->username === 'GALPON.ALFONSO';
+
+            $countQuery->where(function($q) use ($user, $baseRif, $isGalpon) {
+                $q->where('appointments.rif_proveedor', $user->username)
+                  ->orWhere('appointments.rif_proveedor', $user->rif)
+                  ->orWhere('appointments.rif_proveedor', 'LIKE', '%' . $baseRif . '%')
+                  ->orWhere('appointments.user_id', $user->id);
+                if ($isGalpon) {
+                    $q->orWhere('appointments.es_traslado_interno', true)
+                      ->orWhere('appointments.numero_oc', 'LIKE', 'TI-%');
+                }
+            });
+        }
+        if (!$isTestAuthorized) {
+            $countQuery->where(function($q) {
+                $q->where('appointments.numero_oc', 'not like', 'TEST-%')
+                  ->where(function($sub) {
+                      $sub->whereNull('appointments.rif_proveedor')
+                          ->orWhereNotIn('appointments.rif_proveedor', ['J-999999999', 'J999999999']);
+                  });
+            });
+        }
+        $countActivas = (clone $countQuery)->whereIn('appointments.estatus', ['programada', 'en muelle'])->count();
+        $countFinalizadas = (clone $countQuery)->where('appointments.estatus', 'finalizada')->count();
+
+        return response()->json([
+            'citas' => $citas,
+            'compradores' => $compradoresBase,
+            'counts' => [
+                'activas' => $countActivas,
+                'finalizadas' => $countFinalizadas,
+            ]
+        ]);
     }
 
     /**
@@ -541,6 +894,30 @@ class CitaController extends Controller
             'leida' => false,
         ]);
 
+        // Enviar Push Notification (defensivo)
+        try {
+            $usersToNotify = collect();
+            if ($cita->user_id) {
+                $proveedorUser = \App\Models\User::find($cita->user_id);
+                if ($proveedorUser) $usersToNotify->push($proveedorUser);
+            }
+            $syncRow = DB::table('erp_ordenes_sync')->where('numero_oc', $cita->numero_oc)->first();
+            if ($syncRow && $syncRow->habilitada_por_user_id) {
+                $compradorUser = \App\Models\User::find($syncRow->habilitada_por_user_id);
+                if ($compradorUser) $usersToNotify->push($compradorUser);
+            }
+            if ($usersToNotify->isNotEmpty()) {
+                \Illuminate\Support\Facades\Notification::send($usersToNotify, new \App\Notifications\PushNotification(
+                    'Cita Cancelada',
+                    "La cita de la orden {$cita->numero_oc} ha sido cancelada.\nMotivo: {$validated['motivo']}",
+                    null,
+                    '/dashboard'
+                ));
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Push notification no enviada (cancelar): ' . $e->getMessage());
+        }
+
         // --- ENVIAR CORREO DE CANCELACIÓN ---
         try {
             $citaCompleta = DB::table('appointments')
@@ -598,9 +975,16 @@ class CitaController extends Controller
             return response()->json(['error' => 'La cita ya se encuentra finalizada.'], 400);
         }
 
+        $userName = auth('web')->user() ? auth('web')->user()->name : 'Recepción';
+        $userId = auth('web')->id();
+        $now = now();
+
         DB::table('appointments')->where('id', $id)->update([
             'estatus' => 'finalizada',
-            'updated_at' => now(),
+            'fecha_completada' => $now,
+            'completada_por_nombre' => $userName,
+            'completada_por_user_id' => $userId,
+            'updated_at' => $now,
         ]);
 
         // Registrar en Bitácora de Rutas Logísticas
@@ -608,8 +992,8 @@ class CitaController extends Controller
             'numero_oc' => $cita->numero_oc,
             'estatus_anterior' => $cita->estatus,
             'estatus_nuevo' => 'finalizada',
-            'user_id' => auth('web')->id() ?? 1,
-            'user_name' => auth('web')->user() ? auth('web')->user()->name : 'Sistema',
+            'user_id' => $userId ?? 1,
+            'user_name' => $userName,
         ]);
 
         // Registrar en Bitácora Global
@@ -646,6 +1030,23 @@ class CitaController extends Controller
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::error('Error deferring finalization mail: ' . $e->getMessage());
             }
+        }
+        
+        // Push Notification al Comprador (defensivo)
+        try {
+            if (isset($comprador) && $comprador) {
+                $compradorModel = \App\Models\User::find($comprador->id);
+                if ($compradorModel) {
+                    \Illuminate\Support\Facades\Notification::send($compradorModel, new \App\Notifications\PushNotification(
+                        'Mercancía Recibida',
+                        "La cita de la orden {$cita->numero_oc} ha sido finalizada y la mercancía recibida por Recepción.",
+                        null,
+                        '/reservar-cita'
+                    ));
+                }
+            }
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Push notification no enviada (finalizar): ' . $e->getMessage());
         }
 
         return response()->json([
@@ -759,135 +1160,607 @@ class CitaController extends Controller
      */
     public function habilitarOdc(Request $request)
     {
-        $validated = $request->validate([
-            'numero_oc' => 'required|string',
-            'proveedor' => 'required|string',
-            'rif' => 'required|string',
-            'contacto_id' => 'nullable|integer',
-            'email' => 'required|email',
-            'telefono' => 'required|string',
-            'asesor' => 'required|string',
-        ]);
+        try {
+            $validated = $request->validate([
+                'numero_oc' => 'required|string',
+                'proveedor' => 'required|string',
+                'rif' => 'required|string',
+                'contacto_id' => 'nullable|integer',
+                'email' => 'required|email',
+                'emails_adicionales' => 'nullable|array|max:2',
+                'emails_adicionales.*' => 'nullable|email',
+                'telefono' => 'required|string',
+                'asesor' => 'required|string',
+            ]);
 
-        // Marcar ODC como habilitada en erp_ordenes_sync (si existe allí)
-        $ordenLimpia = preg_replace('/^E/i', '', $validated['numero_oc']);
-        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
-        $ordenConE = 'E' . $ordenPad;
-        
-        $syncRow = DB::table('erp_ordenes_sync')
-            ->whereIn('numero_oc', [$validated['numero_oc'], $ordenLimpia, $ordenPad, $ordenConE])
-            ->first();
+            $emailVal = trim($validated['email']);
+            $rifVal = trim($validated['rif']);
+            $rifClean = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $rifVal));
+            $asesorVal = $validated['asesor'] ?: $validated['proveedor'];
 
-        if ($syncRow) {
-            // Prevenir doble habilitación si ya está habilitada o tiene cita activa
-            if ($syncRow->estatus_habilitacion === 'habilitada') {
-                $tieneCita = DB::table('appointments')
-                    ->where('numero_oc', $syncRow->numero_oc)
-                    ->whereIn('estatus', ['programada', 'en muelle'])
-                    ->exists();
-
-                if ($tieneCita) {
-                    return response()->json(['error' => 'Esta orden de compra ya tiene una cita agendada activa.'], 422);
+            // Procesar correos adicionales (hasta 2 adicionales, total máx 3)
+            $emailsAdicionales = [];
+            if (!empty($validated['emails_adicionales']) && is_array($validated['emails_adicionales'])) {
+                foreach ($validated['emails_adicionales'] as $emAd) {
+                    $emAd = trim(strtolower((string)$emAd));
+                    if ($emAd !== '' && filter_var($emAd, FILTER_VALIDATE_EMAIL) && strtolower($emAd) !== strtolower($emailVal) && !in_array($emAd, $emailsAdicionales)) {
+                        $emailsAdicionales[] = $emAd;
+                    }
                 }
-                return response()->json(['error' => 'Esta orden de compra ya fue habilitada previamente.'], 422);
+                $emailsAdicionales = array_slice($emailsAdicionales, 0, 2);
+            }
+            $todosLosCorreos = array_values(array_unique(array_merge([$emailVal], $emailsAdicionales)));
+
+            // Marcar ODC como habilitada en erp_ordenes_sync (si existe allí)
+            $ordenLimpia = preg_replace('/^E/i', '', $validated['numero_oc']);
+            $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+            $ordenConE = 'E' . $ordenPad;
+            
+            $syncRow = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$validated['numero_oc'], $ordenLimpia, $ordenPad, $ordenConE])
+                ->first();
+
+            if ($syncRow) {
+                // Prevenir doble habilitación únicamente si ya tiene cita agendada activa
+                if ($syncRow->estatus_habilitacion === 'habilitada') {
+                    $tieneCita = DB::table('appointments')
+                        ->where('numero_oc', $syncRow->numero_oc)
+                        ->whereIn('estatus', ['programada', 'en muelle'])
+                        ->exists();
+
+                    if ($tieneCita) {
+                        return response()->json(['error' => 'Esta orden de compra ya tiene una cita agendada activa.'], 422);
+                    }
+                    // Si la orden ya estaba habilitada pero no tiene cita agendada, se permite re-enviar la notificación al correo del vendedor especificado
+                }
+
+                $currentResumen = json_decode($syncRow->resumen_json, true) ?? [];
+                $currentResumen['Codigo_Proveedor'] = $validated['rif'];
+                $currentResumen['emails_notificados'] = $todosLosCorreos;
+                
+                DB::table('erp_ordenes_sync')->where('numero_oc', $syncRow->numero_oc)->update([
+                    'estatus_habilitacion' => 'habilitada',
+                    'habilitada_por_user_id' => auth()->id() ?? 1,
+                    'rif_proveedor' => $validated['rif'],
+                    'resumen_json' => json_encode($currentResumen)
+                ]);
+            } else {
+                DB::table('erp_ordenes_sync')->insert([
+                    'numero_oc' => $validated['numero_oc'],
+                    'proveedor' => $validated['proveedor'],
+                    'rif_proveedor' => $validated['rif'],
+                    'estatus_habilitacion' => 'habilitada',
+                    'habilitada_por_user_id' => auth()->id() ?? 1,
+                    'resumen_json' => json_encode([
+                        'Codigo_Proveedor' => $validated['rif'],
+                        'emails_notificados' => $todosLosCorreos
+                    ]),
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
             }
 
-            $currentResumen = json_decode($syncRow->resumen_json, true) ?? [];
-            $currentResumen['Codigo_Proveedor'] = $validated['rif'];
-            
-            DB::table('erp_ordenes_sync')->where('numero_oc', $syncRow->numero_oc)->update([
-                'estatus_habilitacion' => 'habilitada',
-                'habilitada_por_user_id' => auth()->id() ?? 1,
-                'resumen_json' => json_encode($currentResumen)
-            ]);
-        } else {
-            DB::table('erp_ordenes_sync')->insert([
-                'numero_oc' => $validated['numero_oc'],
-                'proveedor' => $validated['proveedor'],
-                'estatus_habilitacion' => 'habilitada',
-                'habilitada_por_user_id' => auth()->id() ?? 1,
-                'resumen_json' => json_encode(['Codigo_Proveedor' => $validated['rif']]),
-                'created_at' => now(),
-                'updated_at' => now()
-            ]);
-        }
+            // Verificar si el proveedor ya tiene cuenta registrada o crearla para persistir el correo
+            // 1. Buscar si ya existe un usuario proveedor con este correo exacto
+            $proveedorUser = User::where('role', 'proveedor')->where('email', $emailVal)->first();
 
-        // Verificar si el proveedor ya tiene cuenta registrada o crearla para persistir el correo
-        $proveedorUser = User::where('username', $validated['rif'])->first();
-        if (!$proveedorUser) {
-            $proveedorUser = User::create([
-                'name' => $validated['asesor'] ?: $validated['proveedor'],
-                'username' => $validated['rif'],
-                'email' => $validated['email'],
-                'role' => 'proveedor',
-                'password' => \Illuminate\Support\Facades\Hash::make($validated['rif']), // Contraseña temporal = RIF
-            ]);
-        } else {
-            if (empty($proveedorUser->email) || $proveedorUser->email !== $validated['email']) {
-                $proveedorUser->email = $validated['email'];
+            // 2. Si no existe por correo, buscar si hay un usuario proveedor para este RIF exacto (c_codproveed)
+            if (!$proveedorUser) {
+                $proveedorUser = User::where('role', 'proveedor')
+                    ->where(function($q) use ($rifVal, $rifClean) {
+                        $q->whereIn('username', [$rifVal, $rifClean])
+                          ->orWhereIn('rif', [$rifVal, $rifClean]);
+                    })
+                    ->first();
+
+                // Si la cuenta encontrada tiene un correo configurado DIFERENTE al ingresado,
+                // y no es un dummy @proveedor.suraki.net, significa que es un vendedor u otro departamento distinto.
+                if ($proveedorUser && !empty($proveedorUser->email) && !str_contains($proveedorUser->email, '@proveedor.suraki.net') && strtolower(trim($proveedorUser->email)) !== strtolower($emailVal)) {
+                    $proveedorUser = null; // Se creará una cuenta multiusuario independiente para este vendedor
+                }
+            }
+
+            if (!$proveedorUser) {
+                $cleanName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $asesorVal));
+                $userSlug = $rifVal;
+                
+                // Si el username de RIF principal ya existe para otro vendedor del mismo RIF, asignamos slug diferenciador
+                if (User::where('username', $userSlug)->exists()) {
+                    $userSlug = $rifVal . ($cleanName ? '.' . $cleanName : '.' . rand(10, 99));
+                    if (User::where('username', $userSlug)->exists()) {
+                        $userSlug = $userSlug . rand(10, 99);
+                    }
+                }
+
+                $proveedorUser = User::create([
+                    'name' => $asesorVal,
+                    'username' => $userSlug,
+                    'rif' => $rifVal,
+                    'email' => $emailVal,
+                    'role' => 'proveedor',
+                    'password' => \Illuminate\Support\Facades\Hash::make($rifVal), // Contraseña temporal = RIF
+                ]);
+            } else {
+                if (empty($proveedorUser->rif)) {
+                    $proveedorUser->rif = $rifVal;
+                }
+                if (empty($proveedorUser->email) || str_contains($proveedorUser->email, '@proveedor.suraki.net')) {
+                    $proveedorUser->email = $emailVal;
+                }
                 $proveedorUser->save();
             }
-        }
 
-        // Registrar/actualizar contacto para persistir el correo y teléfono del proveedor
-        \App\Models\ProveedorContacto::updateOrCreate(
-            [
-                'user_id' => $proveedorUser->id,
-                'email' => $validated['email'],
-            ],
-            [
-                'nombre' => $validated['asesor'] ?: $validated['proveedor'],
-                'telefono' => $validated['telefono'] ?: '0000000000',
-            ]
-        );
+            // Registrar/actualizar contacto principal para persistir el correo y teléfono del proveedor
+            \App\Models\ProveedorContacto::updateOrCreate(
+                [
+                    'user_id' => $proveedorUser->id,
+                    'email' => $emailVal,
+                ],
+                [
+                    'nombre' => $asesorVal,
+                    'telefono' => $validated['telefono'] ?: '0000000000',
+                ]
+            );
 
-        $yaRegistrado = false;
-        if ($proveedorUser && !empty($proveedorUser->password)) {
-            // Si la clave es su RIF, se considera que aún no ha completado el registro
-            if (!\Illuminate\Support\Facades\Hash::check($validated['rif'], $proveedorUser->password)) {
-                $yaRegistrado = true;
-            }
-        }
-
-        // Enviar el correo de notificación
-        $infoCorreo = (object)[
-            'numero_oc' => $validated['numero_oc'],
-            'proveedor' => $validated['proveedor'],
-            'username' => $validated['rif'],
-            'email_destino' => $validated['email'],
-            'vendedor_nombre' => $validated['asesor'],
-            'comprador_nombre' => auth()->user() ? auth()->user()->name : 'Comprador',
-        ];
-
-        try {
-            if ($yaRegistrado) {
-                // Proveedor ya tiene cuenta → enviar correo simplificado (sin enlace de registro)
-                defer(fn () => \Illuminate\Support\Facades\Mail::to($validated['email'])->send(new \App\Mail\OdcHabilitadaRegistrado($infoCorreo)));
-            } else {
-                // Proveedor nuevo → enviar correo con enlace de registro
-                defer(fn () => \Illuminate\Support\Facades\Mail::to($validated['email'])->send(new \App\Mail\OdcHabilitada($infoCorreo)));
+            // Registrar/actualizar contactos adicionales si fueron especificados
+            foreach ($emailsAdicionales as $emAd) {
+                \App\Models\ProveedorContacto::updateOrCreate(
+                    [
+                        'user_id' => $proveedorUser->id,
+                        'email' => $emAd,
+                    ],
+                    [
+                        'nombre' => $asesorVal . ' (Copia)',
+                        'telefono' => $validated['telefono'] ?: '0000000000',
+                    ]
+                );
             }
 
-            // Crear notificación in-app para el proveedor (campana + toast)
-            if ($proveedorUser) {
+            $yaRegistrado = false;
+            if ($proveedorUser && !empty($proveedorUser->password)) {
+                // Si la clave es su RIF, se considera que aún no ha completado el registro
+                if (!\Illuminate\Support\Facades\Hash::check($validated['rif'], $proveedorUser->password)) {
+                    $yaRegistrado = true;
+                }
+            }
+
+            // Enviar el correo de notificación al correo principal
+            $infoCorreo = (object)[
+                'numero_oc' => $validated['numero_oc'],
+                'proveedor' => $validated['proveedor'],
+                'username' => $proveedorUser->username,
+                'email_destino' => $emailVal,
+                'vendedor_nombre' => $asesorVal,
+                'comprador_nombre' => auth()->user() ? auth()->user()->name : 'Comprador',
+            ];
+
+            $emailSuccess = true;
+            $emailError = null;
+
+            try {
+                if ($yaRegistrado) {
+                    \Illuminate\Support\Facades\Mail::to($emailVal)->send(new \App\Mail\OdcHabilitadaRegistrado($infoCorreo));
+                } else {
+                    \Illuminate\Support\Facades\Mail::to($emailVal)->send(new \App\Mail\OdcHabilitada($infoCorreo));
+                }
+                try {
+                    \App\Models\EmailLog::create([
+                        'numero_oc' => $validated['numero_oc'],
+                        'proveedor' => $validated['proveedor'],
+                        'email_destino' => $emailVal,
+                        'vendedor_nombre' => $asesorVal,
+                        'tipo_evento' => 'odc_habilitada',
+                        'estatus' => 'exitoso',
+                    ]);
+                } catch (\Exception $e) {}
+            } catch (\Exception $e) {
+                $emailSuccess = false;
+                $emailError = $e->getMessage();
+                \Illuminate\Support\Facades\Log::error('Error enviando correo de ODC habilitada: ' . $e->getMessage());
+                try {
+                    \App\Models\EmailLog::create([
+                        'numero_oc' => $validated['numero_oc'],
+                        'proveedor' => $validated['proveedor'],
+                        'email_destino' => $emailVal,
+                        'vendedor_nombre' => $asesorVal,
+                        'tipo_evento' => 'odc_habilitada',
+                        'estatus' => 'error',
+                        'error_mensaje' => $e->getMessage(),
+                    ]);
+                } catch (\Exception $e2) {}
+            }
+
+            // Enviar a correos adicionales (hasta 2) y registrar cada uno en EmailLog
+            foreach ($emailsAdicionales as $emAd) {
+                $infoCorreoAd = (object)[
+                    'numero_oc' => $validated['numero_oc'],
+                    'proveedor' => $validated['proveedor'],
+                    'username' => $proveedorUser->username,
+                    'email_destino' => $emAd,
+                    'vendedor_nombre' => $asesorVal,
+                    'comprador_nombre' => auth()->user() ? auth()->user()->name : 'Comprador',
+                ];
+                try {
+                    if ($yaRegistrado) {
+                        \Illuminate\Support\Facades\Mail::to($emAd)->send(new \App\Mail\OdcHabilitadaRegistrado($infoCorreoAd));
+                    } else {
+                        \Illuminate\Support\Facades\Mail::to($emAd)->send(new \App\Mail\OdcHabilitada($infoCorreoAd));
+                    }
+                    try {
+                        \App\Models\EmailLog::create([
+                            'numero_oc' => $validated['numero_oc'],
+                            'proveedor' => $validated['proveedor'],
+                            'email_destino' => $emAd,
+                            'vendedor_nombre' => $asesorVal . ' (Copia)',
+                            'tipo_evento' => 'odc_habilitada',
+                            'estatus' => 'exitoso',
+                        ]);
+                    } catch (\Exception $eLog) {}
+                } catch (\Exception $eAd) {
+                    \Illuminate\Support\Facades\Log::error("Error enviando correo adicional ({$emAd}) de ODC habilitada: " . $eAd->getMessage());
+                    try {
+                        \App\Models\EmailLog::create([
+                            'numero_oc' => $validated['numero_oc'],
+                            'proveedor' => $validated['proveedor'],
+                            'email_destino' => $emAd,
+                            'vendedor_nombre' => $asesorVal . ' (Copia)',
+                            'tipo_evento' => 'odc_habilitada',
+                            'estatus' => 'error',
+                            'error_mensaje' => $eAd->getMessage(),
+                        ]);
+                    } catch (\Exception $eLog2) {}
+                }
+            }
+
+            // Push Notification al Proveedor (defensivo)
+            try {
+                if ($proveedorUser) {
+                    \Illuminate\Support\Facades\Notification::send($proveedorUser, new \App\Notifications\PushNotification(
+                        'Orden Habilitada',
+                        "La orden {$validated['numero_oc']} ha sido habilitada para agendar cita. Ingrese al sistema para reservar su muelle.",
+                        null,
+                        '/reservar-cita'
+                    ));
+                }
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning('Push notification no enviada (habilitarOdc): ' . $e->getMessage());
+            }
+
+            // --- CREAR NOTIFICACIÓN EN LA CAMPANITA PARA EL PROVEEDOR Y RECEPCIÓN ---
+            try {
+                if ($proveedorUser) {
+                    \App\Models\Notificacion::create([
+                        'numero_oc' => $validated['numero_oc'],
+                        'proveedor' => $validated['proveedor'],
+                        'tipo' => 'odc_habilitada',
+                        'fecha_oc' => now(),
+                        'fecha_recepcion' => null,
+                        'status_erp' => 'HABILITADA',
+                        'leida' => false,
+                        'target_user_id' => $proveedorUser->id,
+                    ]);
+                }
                 \App\Models\Notificacion::create([
                     'numero_oc' => $validated['numero_oc'],
                     'proveedor' => $validated['proveedor'],
                     'tipo' => 'odc_habilitada',
                     'fecha_oc' => now(),
-                    'target_user_id' => $proveedorUser->id,
+                    'fecha_recepcion' => null,
+                    'status_erp' => 'HABILITADA',
                     'leida' => false,
+                    'target_user_id' => null,
                 ]);
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning('Notificación campanita no creada: ' . $e->getMessage());
             }
 
-            $msg = $yaRegistrado 
-                ? 'ODC habilitada. El proveedor ya está registrado, se le envió notificación para que agende directamente.'
-                : 'ODC habilitada y correo con enlace de registro enviado al proveedor exitosamente.';
+            $appBaseUrl = rtrim(config('app.url') ?? '', '/');
+            if (empty($appBaseUrl) || str_contains($appBaseUrl, '.test') || str_contains($appBaseUrl, 'localhost') || str_contains($appBaseUrl, '127.0.0.1') || str_contains($appBaseUrl, 'logistica.suraki.net')) {
+                $appBaseUrl = 'https://citsur.suraki.net';
+            }
 
-            return response()->json(['message' => $msg, 'ya_registrado' => $yaRegistrado]);
-        } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::error('Error enviando correo de ODC habilitada: ' . $e->getMessage());
-            return response()->json(['message' => 'ODC habilitada, pero hubo un error enviando el correo de notificación.', 'error_mail' => $e->getMessage()], 200);
+            $linkAcceso = $yaRegistrado 
+                ? $appBaseUrl . '/login' 
+                : $appBaseUrl . '/setup-proveedor?rif=' . urlencode($proveedorUser->username) . '&email=' . urlencode($emailVal) . '&name=' . urlencode($asesorVal ?? $validated['proveedor']);
+
+            if (!$emailSuccess) {
+                return response()->json([
+                    'message' => 'Orden habilitada, pero falló el envío del correo: ' . $emailError,
+                    'proveedor_registrado' => $yaRegistrado,
+                    'link_acceso' => $linkAcceso,
+                    'email_destino' => $emailVal,
+                    'emails_adicionales' => $emailsAdicionales,
+                ], 206); // 206 Partial Content indicates partial success
+            }
+            
+            return response()->json([
+                'message' => 'Orden habilitada correctamente.',
+                'proveedor_registrado' => $yaRegistrado,
+                'link_acceso' => $linkAcceso,
+                'email_destino' => $emailVal,
+                'emails_adicionales' => $emailsAdicionales,
+            ]);
+            
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => "Error interno en el código: " . $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ], 500);
+        }
+    }
+
+
+    /**
+     * Eliminar el estado de habilitación de una orden y devolverla a pendiente
+     */
+    public function deshabilitarOdc($numero_oc)
+    {
+        if (!auth()->check() || auth()->user()->role !== 'admin') {
+            return response()->json(['error' => 'Acceso denegado. Sólo administradores.'], 403);
+        }
+
+        $ordenLimpia = preg_replace('/^E/i', '', $numero_oc);
+        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+        $ordenConE = 'E' . $ordenPad;
+
+        $syncRow = DB::table('erp_ordenes_sync')
+            ->whereIn('numero_oc', [$numero_oc, $ordenLimpia, $ordenPad, $ordenConE])
+            ->first();
+
+        if (!$syncRow) {
+            return response()->json(['error' => 'La orden no se encuentra en estado habilitada ni agendada.'], 404);
+        }
+
+        $tieneCita = DB::table('appointments')
+            ->whereIn('numero_oc', [$syncRow->numero_oc, $numero_oc, $ordenLimpia, $ordenPad])
+            ->whereIn('estatus', ['programada', 'en muelle', 'finalizada'])
+            ->exists();
+
+        if ($tieneCita) {
+            return response()->json(['error' => 'No se puede restablecer porque la orden ya tiene una cita asociada.'], 422);
+        }
+
+        // Obtener el RIF del proveedor de la orden para intentar borrar su usuario
+        $resumen = json_decode($syncRow->resumen_json, true) ?? [];
+        $rifProveedor = $resumen['Codigo_Proveedor'] ?? null;
+
+        // En lugar de borrar la orden, se devuelve a estado pendiente y se resetean las marcas de habilitación
+        DB::table('erp_ordenes_sync')
+            ->where('numero_oc', $syncRow->numero_oc)
+            ->update([
+                'estatus_habilitacion' => 'pendiente',
+                'habilitada_por_user_id' => null,
+                'rif_proveedor' => null,
+                'updated_at' => now(),
+            ]);
+
+        if ($rifProveedor) {
+            $limpiarRif = function($val) {
+                return strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($val ?? '')));
+            };
+            $rifLimpio = $limpiarRif($rifProveedor);
+
+            // Verificar si este proveedor tiene otras órdenes activas
+            $otrasOrdenes = DB::table('erp_ordenes_sync')
+                ->where('resumen_json', 'like', '%' . $rifProveedor . '%')
+                ->exists();
+
+            if (!$otrasOrdenes) {
+                // Si no tiene más órdenes, buscamos usuarios coincidentes (por RIF o username)
+                $proveedoresUsers = \App\Models\User::where('role', 'proveedor')
+                    ->get()
+                    ->filter(function($u) use ($limpiarRif, $rifLimpio) {
+                        return $limpiarRif($u->rif) === $rifLimpio || $limpiarRif($u->username) === $rifLimpio;
+                    });
+
+                foreach ($proveedoresUsers as $proveedorUser) {
+                    try {
+                        \App\Models\ProveedorContacto::where('user_id', $proveedorUser->id)->delete();
+                        DB::table('push_subscriptions')
+                            ->where('subscribable_type', \App\Models\User::class)
+                            ->where('subscribable_id', $proveedorUser->id)
+                            ->delete();
+                        $proveedorUser->delete();
+                    } catch (\Throwable $ex) {}
+                }
+            }
+        }
+
+        return response()->json([
+            'message' => 'Orden restablecida a estado pendiente correctamente.'
+        ]);
+    }
+
+    /**
+     * Enviar correo masivo profesional a todos los proveedores con ODCs habilitadas
+     */
+    public function notificarOdcsHabilitadas(Request $request)
+    {
+        if (!auth()->check() || auth()->user()->role !== 'admin') {
+            return response()->json(['error' => 'Acceso denegado. Sólo administradores.'], 403);
+        }
+
+        $ordenes = DB::table('erp_ordenes_sync')
+            ->where('estatus_habilitacion', 'habilitada')
+            ->get();
+
+        if (empty($ordenes) || (is_object($ordenes) && method_exists($ordenes, 'isEmpty') && $ordenes->isEmpty()) || (is_array($ordenes) && count($ordenes) === 0)) {
+            return response()->json(['message' => 'No hay órdenes en estado habilitada para notificar.'], 404);
+        }
+
+        $enviados = 0;
+        $detalles = [];
+
+        $limpiarRif = function($val) {
+            return strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($val ?? '')));
+        };
+
+        foreach ($ordenes as $o) {
+            $resumen = json_decode($o->resumen_json, true) ?? [];
+            $codProv = trim($o->rif_proveedor ?: ($resumen['Codigo_Proveedor'] ?? $resumen['c_RIF'] ?? $resumen['Cod_Proveedor'] ?? ''));
+            $rifLimpio = $limpiarRif($codProv);
+
+            // Buscar TODOS los usuarios proveedor vinculados a este RIF
+            $users = User::where('role', 'proveedor')
+                ->get()
+                ->filter(function($u) use ($limpiarRif, $rifLimpio) {
+                    return (!empty($rifLimpio) && ($limpiarRif($u->rif) === $rifLimpio || $limpiarRif($u->username) === $rifLimpio));
+                });
+
+            $emailsTarget = [];
+
+            if ($users->count() > 0) {
+                foreach ($users as $uProv) {
+                    if (!empty($uProv->email)) {
+                        $emailsTarget[$uProv->email] = $uProv->name;
+                    }
+                    $contactos = \App\Models\ProveedorContacto::where('user_id', $uProv->id)->get();
+                    foreach ($contactos as $cnt) {
+                        if (!empty($cnt->email)) {
+                            $emailsTarget[$cnt->email] = $cnt->nombre ?: $uProv->name;
+                        }
+                    }
+
+                    // Notificación en la campanita para el usuario
+                    try {
+                        $existeNotifProv = \App\Models\Notificacion::where('numero_oc', $o->numero_oc)
+                            ->where('tipo', 'odc_habilitada')
+                            ->where('target_user_id', $uProv->id)
+                            ->exists();
+                        if (!$existeNotifProv) {
+                            \App\Models\Notificacion::create([
+                                'numero_oc' => $o->numero_oc,
+                                'proveedor' => $o->proveedor ?: ($resumen['Nombre_Proveedor'] ?? 'Proveedor'),
+                                'tipo' => 'odc_habilitada',
+                                'fecha_oc' => now(),
+                                'fecha_recepcion' => null,
+                                'status_erp' => 'HABILITADA',
+                                'leida' => false,
+                                'target_user_id' => $uProv->id,
+                            ]);
+                        }
+                    } catch (\Exception $e) {}
+                }
+            }
+
+            if (empty($emailsTarget)) {
+                $rawEmail = $resumen['Email'] ?? $resumen['email'] ?? null;
+                if ($rawEmail) {
+                    $emailsTarget[$rawEmail] = $o->proveedor ?: 'Estimado Proveedor';
+                }
+            }
+
+            // Notificación campanita general
+            try {
+                $existeGeneral = \App\Models\Notificacion::where('numero_oc', $o->numero_oc)
+                    ->where('tipo', 'odc_habilitada')
+                    ->whereNull('target_user_id')
+                    ->exists();
+                if (!$existeGeneral) {
+                    \App\Models\Notificacion::create([
+                        'numero_oc' => $o->numero_oc,
+                        'proveedor' => $o->proveedor ?: ($resumen['Nombre_Proveedor'] ?? 'Proveedor'),
+                        'tipo' => 'odc_habilitada',
+                        'fecha_oc' => now(),
+                        'fecha_recepcion' => null,
+                        'status_erp' => 'HABILITADA',
+                        'leida' => false,
+                        'target_user_id' => null,
+                    ]);
+                }
+            } catch (\Exception $e) {}
+
+            // Enviar notificación a todos los correos de vendedores/contactos encontrados de forma síncrona
+            foreach ($emailsTarget as $emailDestino => $vendedorNombre) {
+                $uProv = \App\Models\User::where('username', $codProv)->first();
+                $yaRegistrado = false;
+                if ($uProv && !empty($uProv->password)) {
+                    if (!\Illuminate\Support\Facades\Hash::check($codProv, $uProv->password)) {
+                        $yaRegistrado = true;
+                    }
+                }
+
+                $infoCorreo = (object)[
+                    'numero_oc' => $o->numero_oc,
+                    'proveedor' => $o->proveedor ?: ($resumen['Nombre_Proveedor'] ?? 'Proveedor'),
+                    'username' => $codProv,
+                    'email_destino' => $emailDestino,
+                    'vendedor_nombre' => $vendedorNombre ?: ($o->proveedor ?: 'Estimado Proveedor'),
+                    'ya_registrado' => $yaRegistrado,
+                ];
+
+                try {
+                    \Illuminate\Support\Facades\Mail::to($emailDestino)->send(new \App\Mail\NotificacionReactivacionOdc($infoCorreo));
+                    $enviados++;
+                    try {
+                        \App\Models\EmailLog::create([
+                            'numero_oc' => $o->numero_oc,
+                            'proveedor' => $o->proveedor ?: ($resumen['Nombre_Proveedor'] ?? 'Proveedor'),
+                            'email_destino' => $emailDestino,
+                            'vendedor_nombre' => $vendedorNombre ?: ($o->proveedor ?: 'Estimado Proveedor'),
+                            'tipo_evento' => 'reactivacion',
+                            'estatus' => 'exitoso',
+                        ]);
+                    } catch (\Exception $e) {}
+                    $detalles[] = [
+                        'numero_oc' => $o->numero_oc,
+                        'email' => $emailDestino,
+                        'estatus' => 'Enviado'
+                    ];
+                } catch (\Exception $e) {
+                    try {
+                        \App\Models\EmailLog::create([
+                            'numero_oc' => $o->numero_oc,
+                            'proveedor' => $o->proveedor ?: ($resumen['Nombre_Proveedor'] ?? 'Proveedor'),
+                            'email_destino' => $emailDestino,
+                            'vendedor_nombre' => $vendedorNombre ?: ($o->proveedor ?: 'Estimado Proveedor'),
+                            'tipo_evento' => 'reactivacion',
+                            'estatus' => 'error',
+                            'error_mensaje' => $e->getMessage(),
+                        ]);
+                    } catch (\Exception $e2) {}
+                    $detalles[] = [
+                        'numero_oc' => $o->numero_oc,
+                        'email' => $emailDestino,
+                        'estatus' => 'Error: ' . $e->getMessage()
+                    ];
+                }
+            }
+        }
+
+        return response()->json([
+            'status' => 'Exitoso',
+            'enviados' => $enviados,
+            'detalles' => $detalles
+        ]);
+    }
+
+    /**
+     * Endpoint para probar el envío de notificaciones Push desde el servidor
+     */
+    public function probarPushServidor(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['error' => 'No autenticado'], 401);
+        }
+
+        try {
+            if (class_exists(\App\Notifications\PushNotification::class)) {
+                $user->notify(new \App\Notifications\PushNotification(
+                    '🧪 Notificación Servidor - Suraki Logística',
+                    '¡Excelente! Las notificaciones Push desde el servidor Laravel están funcionando correctamente.',
+                    '/icon.png',
+                    '/dashboard'
+                ));
+            }
+            return response()->json([
+                'status' => 'Exitoso',
+                'message' => 'Notificación Push de prueba enviada exitosamente a tu dispositivo.'
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
@@ -900,22 +1773,67 @@ class CitaController extends Controller
             return response()->json(['error' => 'No autorizado'], 403);
         }
 
-        $rif = auth('web')->user()->username;
+        $user = auth('web')->user();
+        $rawRif = $user->rif ?: $user->username;
         
-        // Buscar en erp_ordenes_sync las órdenes de este RIF que estén habilitadas
-        // Asumimos que el proveedor contiene el RIF o que ya implementaremos otra forma
-        // Dado que en el ERP Sync a veces el RIF está en el JSON de resumen
+        $limpiarRif = function($val) {
+            if (!$val) return '';
+            $parts = explode('.', $val);
+            return strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($parts[0] ?? '')));
+        };
+
+        $userRifLimpio = $limpiarRif($rawRif);
         
+        if (empty($userRifLimpio)) {
+            return response()->json(['ordenes' => []]);
+        }
+        
+        // Buscar en erp_ordenes_sync las órdenes habilitadas
         $ordenes = DB::table('erp_ordenes_sync')
             ->where('estatus_habilitacion', 'habilitada')
             ->orderBy('fecha_emision', 'desc')
             ->get();
-        // Filtrar manualmente por RIF dentro del JSON (solución temporal rápida)
-        // En un caso ideal, 'rif_proveedor' debería ser una columna directa
+
+        $authUser = auth('web')->user();
+        $isTestAuthorized = $authUser && ($authUser->role === 'admin' || $authUser->username === 'PROV.PRUEBA');
+
         $misOrdenes = [];
         foreach ($ordenes as $o) {
+            if (str_starts_with(strtoupper($o->numero_oc ?? ''), 'TEST-') && !$isTestAuthorized) {
+                continue;
+            }
             $resumen = json_decode($o->resumen_json, true) ?? [];
-            $codProv = trim($resumen['Codigo_Proveedor'] ?? '');
+            
+            // === BÚSQUEDA DE RIF MULTI-FUENTE (robusta) ===
+            $rifMatch = false;
+            
+            // 1. Columna dedicada rif_proveedor (más confiable, no se sobrescribe en sync)
+            if (!empty($o->rif_proveedor) && $limpiarRif($o->rif_proveedor) === $userRifLimpio) {
+                $rifMatch = true;
+            }
+            
+            // 2. Codigo_Proveedor en resumen_json
+            if (!$rifMatch && !empty($resumen['Codigo_Proveedor'])) {
+                if ($limpiarRif($resumen['Codigo_Proveedor']) === $userRifLimpio) {
+                    $rifMatch = true;
+                }
+            }
+            
+            // 3. c_RIF en resumen_json (campo del ERP)
+            if (!$rifMatch && !empty($resumen['c_RIF'])) {
+                if ($limpiarRif($resumen['c_RIF']) === $userRifLimpio) {
+                    $rifMatch = true;
+                }
+            }
+            
+            // 4. Codigo_Proveedor formateado como RIF puro en resumen (v2)
+            if (!$rifMatch && !empty($resumen['Cod_Proveedor'])) {
+                if ($limpiarRif($resumen['Cod_Proveedor']) === $userRifLimpio) {
+                    $rifMatch = true;
+                }
+            }
+
+            if (!$rifMatch) continue;
             
             // Buscar si la orden ya tiene una cita (busqueda robusta)
             $ordenLimpia = preg_replace('/^E/i', '', $o->numero_oc);
@@ -926,7 +1844,7 @@ class CitaController extends Controller
                 ->whereIn('estatus', ['programada', 'en muelle'])
                 ->exists();
                 
-            if (strtoupper($codProv) === strtoupper(trim($rif)) && !$tieneCita) {
+            if (!$tieneCita) {
                 $o->resumen = $resumen;
                 $misOrdenes[] = $o;
             }
@@ -935,9 +1853,6 @@ class CitaController extends Controller
         return response()->json(['ordenes' => $misOrdenes]);
     }
 
-    /**
-     * API para calcular duración en tiempo real desde el formulario Vue
-     */
     public function calcularDuracionApi(Request $request)
     {
         $validated = $request->validate([
@@ -966,17 +1881,17 @@ class CitaController extends Controller
             'proveedor' => 'required|string',
             'fecha_cita' => 'required|date',
             'muelle_asignado' => 'required|string',
-            'numero_factura' => 'required|string',
-            'peso_factura_ton' => 'required|numeric',
-            'formato_carga' => 'required|string',
-            'tipo_vehiculo' => 'required|string',
+            'numero_factura' => 'nullable|string',
+            'peso_factura_ton' => 'nullable|numeric',
+            'formato_carga' => 'nullable|string',
+            'tipo_vehiculo' => 'nullable|string',
             'categoria_sugerida' => 'nullable|string',
             'tipo_mercancia' => 'nullable|string',
             'factura_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
             'email_contacto' => 'nullable|email',
         ]);
 
-        $rif = auth()->user()->username;
+        $rif = auth()->user()->rif ?: auth()->user()->username;
         $user_id = auth()->id();
 
         // Obtener el contacto del proveedor
@@ -999,11 +1914,20 @@ class CitaController extends Controller
         $tipoMercancia = $validated['tipo_mercancia'] ?? $validated['categoria_sugerida'] ?? null;
         $catNombre = $tipoMercancia ?? 'Alimentos 1 (Viveres)';
 
+        $pesoFacturaTon = (isset($validated['peso_factura_ton']) && (float)$validated['peso_factura_ton'] > 0) ? (float)$validated['peso_factura_ton'] : 1.0;
+        // Detección inteligente: Si ingresaron > 35 (ej: 50 kg), convertir a toneladas para almacenar el valor real (0.050 Ton)
+        if ($pesoFacturaTon > 35) {
+            $pesoFacturaTon = round($pesoFacturaTon / 1000, 4);
+        }
+        $formatoCarga = !empty($validated['formato_carga']) ? $validated['formato_carga'] : 'suelta';
+        $numFactura = !empty($validated['numero_factura']) ? $validated['numero_factura'] : 'Por facturar';
+        $tipoVehiculo = !empty($validated['tipo_vehiculo']) ? $validated['tipo_vehiculo'] : 'camioneta_panel';
+
         // Calcular duración exacta
         $duracion = \App\Services\AppointmentDurationService::calcular(
             $catNombre,
-            $validated['peso_factura_ton'],
-            $validated['formato_carga'],
+            $pesoFacturaTon,
+            $formatoCarga,
             0
         );
 
@@ -1016,10 +1940,17 @@ class CitaController extends Controller
         if ($fechaCita->dayOfWeek === Carbon::SUNDAY) {
             return response()->json(['error' => 'No se reciben reservaciones los domingos.'], 422);
         }
+        if ($fechaCita->dayOfWeek === Carbon::SATURDAY) {
+            return response()->json(['error' => 'Los sábados están bloqueados para recepción de proveedores.'], 422);
+        }
+        if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
+            return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
+        }
 
-        // Verificar muelle
+        // Verificar muelle considerando muelles equivalentes de la misma sede física
+        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
         $citasExistentes = DB::table('appointments')
-            ->where('muelle_asignado', $validated['muelle_asignado'])
+            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -1029,7 +1960,7 @@ class CitaController extends Controller
             $finExistente = $inicioExistente->copy()->addMinutes((int) $cita->duracion_minutos);
 
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A')], 422);
+                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})"], 422);
             }
         }
 
@@ -1045,7 +1976,7 @@ class CitaController extends Controller
 
         // Obtener categoría ID
         $catModel = \App\Models\CategoriaRendimiento::where('nombre', $catNombre)->first();
-        if (strtolower($validated['formato_carga']) === 'paletizada') {
+        if (strtolower($formatoCarga) === 'paletizada') {
             $paletizadaCat = \App\Models\CategoriaRendimiento::where('nombre', 'Carga Paletizada General')->first();
             if ($paletizadaCat) {
                 $catModel = $paletizadaCat;
@@ -1077,10 +2008,10 @@ class CitaController extends Controller
             'duracion_minutos' => $duracion,
             'estatus' => 'programada',
             'user_id' => auth()->user() ? auth()->id() : 1,
-            'numero_factura' => $validated['numero_factura'],
-            'peso_factura_ton' => $validated['peso_factura_ton'],
-            'formato_carga' => $validated['formato_carga'],
-            'tipo_vehiculo' => $validated['tipo_vehiculo'],
+            'numero_factura' => $numFactura,
+            'peso_factura_ton' => $pesoFacturaTon,
+            'formato_carga' => $formatoCarga,
+            'tipo_vehiculo' => $tipoVehiculo,
             'tipo_mercancia' => $tipoMercancia,
             'factura_path' => $facturaPath,
             'categoria_rendimiento_id' => $catId,
@@ -1139,8 +2070,8 @@ class CitaController extends Controller
         // Enviar correo al comprador
         try {
             $compradores = $compradorId 
-                ? \App\Models\User::where('id', $compradorId)->get()
-                : \App\Models\User::whereIn('role', ['comprador', 'admin'])->get();
+                ? \App\Models\User::where('id', $compradorId)->where('activo', true)->get()
+                : \App\Models\User::whereIn('role', ['comprador', 'admin'])->where('activo', true)->get();
                 
             foreach ($compradores as $comprador) {
                 if (!empty($comprador->email)) {
@@ -1160,9 +2091,26 @@ class CitaController extends Controller
             \Illuminate\Support\Facades\Log::error('Error enviando correo ProveedorReservoCita: ' . $e->getMessage());
         }
 
-        // Enviar correo de confirmación al proveedor
+        // Enviar correo de confirmación al proveedor (hasta los 3 correos registrados)
         try {
             $emailsProveedor = array_unique(array_filter([auth()->user()->email, $contacto ? $contacto->email : null]));
+
+            // Recuperar correos notificados durante la habilitación de la orden
+            $ordenLimpia = preg_replace('/^E/i', '', $validated['numero_oc']);
+            $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+            $ordenConE = 'E' . $ordenPad;
+            $syncRow = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$validated['numero_oc'], $ordenLimpia, $ordenPad, $ordenConE])
+                ->first();
+
+            if ($syncRow && !empty($syncRow->resumen_json)) {
+                $resSync = json_decode($syncRow->resumen_json, true);
+                if (!empty($resSync['emails_notificados']) && is_array($resSync['emails_notificados'])) {
+                    $emailsProveedor = array_merge($emailsProveedor, $resSync['emails_notificados']);
+                }
+            }
+            $emailsProveedor = array_slice(array_values(array_unique(array_filter($emailsProveedor))), 0, 3);
+
             if (count($emailsProveedor) > 0) {
                 $infoCita = (object)[
                     'numero_oc' => $validated['numero_oc'],
@@ -1175,9 +2123,41 @@ class CitaController extends Controller
                     'vendedor_nombre' => $contacto ? $contacto->nombre : auth()->user()->name,
                 ];
                 defer(fn () => \Illuminate\Support\Facades\Mail::to($emailsProveedor)->send(new \App\Mail\NuevaCita($infoCita)));
+
+                foreach ($emailsProveedor as $emP) {
+                    try {
+                        \App\Models\EmailLog::create([
+                            'numero_oc' => $validated['numero_oc'],
+                            'proveedor' => $validated['proveedor'],
+                            'email_destino' => $emP,
+                            'vendedor_nombre' => $contacto ? $contacto->nombre : auth()->user()->name,
+                            'tipo_evento' => 'cita_agendada',
+                            'estatus' => 'exitoso',
+                        ]);
+                    } catch (\Exception $eLog) {}
+                }
             }
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error('Error enviando correo NuevaCita a proveedor: ' . $e->getMessage());
+        }
+
+        // Enviar Push Notification a Receptores, Comprador y Administradores
+        try {
+            $destinatariosPush = \App\Models\User::whereIn('role', ['receptor', 'admin'])->where('activo', true)->get();
+            if ($compradorId) {
+                $compradorPush = \App\Models\User::find($compradorId);
+                if ($compradorPush && !$destinatariosPush->contains('id', $compradorPush->id)) {
+                    $destinatariosPush->push($compradorPush);
+                }
+            }
+            \Illuminate\Support\Facades\Notification::send($destinatariosPush, new \App\Notifications\PushNotification(
+                'Nueva Cita Agendada por Proveedor',
+                "{$validated['proveedor']} ha agendado cita para la orden {$validated['numero_oc']} el " . $fechaCita->format('d/m/Y h:i A'),
+                null,
+                '/dashboard'
+            ));
+        } catch (\Exception $ePush) {
+            \Illuminate\Support\Facades\Log::warning('Push notification no enviada (reservarProveedor): ' . $ePush->getMessage());
         }
 
         return response()->json([
@@ -1199,6 +2179,14 @@ class CitaController extends Controller
      */
     public function detallePorOdc($numero_oc)
     {
+        if (str_starts_with(strtoupper($numero_oc), 'TEST-')) {
+            $authUser = auth('web')->user() ?: request()->user();
+            $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+            if (!$isTestAuthorized) {
+                return response()->json(['error' => 'Cita no encontrada'], 404);
+            }
+        }
+
         $cita = DB::table('appointments')
             ->where('numero_oc', $numero_oc)
             ->first();
@@ -1229,5 +2217,231 @@ class CitaController extends Controller
                 'fecha_creacion' => $cita->created_at,
             ]
         ]);
+    }
+    public function anularFactura(Request $request, $id)
+    {
+        if (!auth('web')->check() || auth('web')->user()->role !== 'proveedor') {
+            return response()->json(['error' => 'No tienes permisos.'], 403);
+        }
+
+        $cita = DB::table('appointments')->where('id', $id)->first();
+        
+        if (!$cita) {
+            return response()->json(['error' => 'Cita no encontrada.'], 404);
+        }
+        
+        if ($cita->rif_proveedor !== auth('web')->user()->username) {
+            return response()->json(['error' => 'No puedes modificar esta cita.'], 403);
+        }
+
+        if ($cita->estatus === 'finalizada' || $cita->estatus === 'cancelada') {
+            return response()->json(['error' => 'No puedes modificar una cita ' . $cita->estatus], 400);
+        }
+
+        if ($cita->factura_path) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($cita->factura_path);
+        }
+
+        DB::table('appointments')->where('id', $id)->update([
+            'numero_factura' => null,
+            'peso_factura_ton' => null,
+            'factura_path' => null,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Factura anulada correctamente.']);
+    }
+
+    public function actualizarFactura(Request $request, $id)
+    {
+        if (!auth('web')->check() || auth('web')->user()->role !== 'proveedor') {
+            return response()->json(['error' => 'No tienes permisos.'], 403);
+        }
+
+        $cita = DB::table('appointments')->where('id', $id)->first();
+        
+        if (!$cita) {
+            return response()->json(['error' => 'Cita no encontrada.'], 404);
+        }
+        
+        if ($cita->rif_proveedor !== auth('web')->user()->username) {
+            return response()->json(['error' => 'No puedes modificar esta cita.'], 403);
+        }
+
+        $validated = $request->validate([
+            'numero_factura' => 'required|string',
+            'peso_factura_ton' => 'required|numeric',
+            'factura_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+        ]);
+
+        $facturaPath = $cita->factura_path;
+        if ($request->hasFile('factura_file')) {
+            if ($facturaPath) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($facturaPath);
+            }
+            $facturaPath = $request->file('factura_file')->store('facturas', 'public');
+        }
+
+        $pesoTon = (float) $validated['peso_factura_ton'];
+        if ($pesoTon > 35) {
+            $pesoTon = round($pesoTon / 1000, 4);
+        }
+
+        // Recalcular la duración con el nuevo peso de la factura
+        $catNombre = $cita->tipo_mercancia ?? 'Alimentos 1 (Viveres)';
+        $formatoCarga = $cita->formato_carga ?? 'suelta';
+        $nuevaDuracion = \App\Services\AppointmentDurationService::calcular(
+            $catNombre,
+            $pesoTon,
+            $formatoCarga,
+            0
+        );
+
+        DB::table('appointments')->where('id', $id)->update([
+            'numero_factura' => $validated['numero_factura'],
+            'peso_factura_ton' => $pesoTon,
+            'duracion_minutos' => $nuevaDuracion,
+            'factura_path' => $facturaPath,
+            'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Factura actualizada correctamente.', 'duracion_minutos' => $nuevaDuracion]);
+    }
+
+    /**
+     * Resolver el comprador real de una Orden de Compra:
+     * Mapea exactamente a los 4 compradores reales del sistema:
+     * ALEJANDRO PEÑA, KARYNELL ARAQUE, Dugarte Yoliys, MARIA JOSE CONTRERAS
+     */
+    private function resolverCompradorReal($numeroOc, $syncRow = null, $cita = null)
+    {
+        $ordenLimpia = preg_replace('/^E/i', '', (string)$numeroOc);
+        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+        $ordenConE = 'E' . $ordenPad;
+
+        $posiblesOcs = array_unique(array_filter([$numeroOc, $ordenLimpia, $ordenPad, $ordenConE]));
+
+        // 1. Buscar en TODOS los registros sincronizados de esta OC
+        $syncRows = DB::table('erp_ordenes_sync')
+            ->whereIn('numero_oc', $posiblesOcs)
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        $codComprador = null;
+
+        foreach ($syncRows as $row) {
+            if (!empty($row->resumen_json)) {
+                $resumen = json_decode($row->resumen_json, true);
+                if (isset($resumen['resumen']) && is_array($resumen['resumen'])) {
+                    $resumen = array_merge($resumen, $resumen['resumen']);
+                }
+                $cod = $resumen['Comprador_Interno'] ?? $resumen['c_CODCOMPRADOR'] ?? $resumen['Cod_Comprador'] ?? null;
+                if ($cod && trim((string)$cod) !== '' && trim((string)$cod) !== 'General') {
+                    $codComprador = trim((string)$cod);
+                    break;
+                }
+            }
+        }
+
+        // 2. Si no se resolvió por sync y hay conexión local con SQLSRV
+        if (!$codComprador && $numeroOc) {
+            try {
+                $sqlRow = DB::connection('sqlsrv')->selectOne("
+                    SELECT c_CODCOMPRADOR FROM MA_ODC WITH (NOLOCK) WHERE c_DOCUMENTO IN (?, ?, ?)
+                ", [$numeroOc, $ordenLimpia, $ordenPad]);
+                if ($sqlRow && !empty($sqlRow->c_CODCOMPRADOR)) {
+                    $codComprador = trim($sqlRow->c_CODCOMPRADOR);
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        $codClean = trim((string)($codComprador ?? ''));
+
+        if ($codClean !== '') {
+            $nombreMapeado = $this->formatearNombreComprador($codClean);
+            if ($nombreMapeado !== 'Comprador ERP') {
+                return $nombreMapeado;
+            }
+        }
+
+        // 3. Verificar si fue habilitada por un usuario comprador web
+        $userId = ($syncRow ? $syncRow->habilitada_por_user_id : null) ?? ($cita ? $cita->habilitada_por_user_id : null);
+        if ($userId) {
+            $u = DB::table('users')->where('id', $userId)->first();
+            if ($u && $u->role === 'comprador') {
+                return $this->formatearNombreComprador(null, $u->name);
+            }
+        }
+
+        // 4. Si el creador registrado es un comprador específico
+        if ($cita && !empty($cita->registrado_por_nombre)) {
+            $nombreCreador = $this->formatearNombreComprador(null, $cita->registrado_por_nombre);
+            if ($nombreCreador !== 'Comprador ERP') {
+                return $nombreCreador;
+            }
+        }
+
+        // 5. Mapeo directo por número de orden para órdenes del sistema
+        $mapaDirectoOc = [
+            '33078' => 'KARYNELL ARAQUE',
+            '33107' => 'KARYNELL ARAQUE',
+            '33065' => 'KARYNELL ARAQUE',
+            '33113' => 'KARYNELL ARAQUE',
+            '33116' => 'Dugarte Yoliys',
+            '33118' => 'Dugarte Yoliys',
+            '33122' => 'Dugarte Yoliys',
+            '33119' => 'MARIA JOSE CONTRERAS',
+            '33120' => 'MARIA JOSE CONTRERAS',
+            '33121' => 'MARIA JOSE CONTRERAS',
+            '33123' => 'MARIA JOSE CONTRERAS',
+        ];
+
+        $ocLimpiaKey = ltrim($ordenLimpia, '0');
+        if (isset($mapaDirectoOc[$ocLimpiaKey])) {
+            return $mapaDirectoOc[$ocLimpiaKey];
+        }
+
+        return 'KARYNELL ARAQUE';
+    }
+
+    /**
+     * Mapeo estricto a los compradores reales del sistema
+     */
+    private function formatearNombreComprador($codigo, $nombreOriginal = null)
+    {
+        $codClean = trim((string)($codigo ?? ''));
+        $codPadded = $codClean !== '' ? str_pad($codClean, 3, '0', STR_PAD_LEFT) : '';
+
+        $mapaCompradoresExacto = [
+            '027' => 'KARYNELL ARAQUE',
+            '176' => 'ALEJANDRO PEÑA',
+            '019' => 'Dugarte Yoliys',
+            '166' => 'MARIA JOSE CONTRERAS',
+            '228' => 'DANIEL (SURAKARNES)',
+        ];
+
+        if ($codPadded !== '' && isset($mapaCompradoresExacto[$codPadded])) {
+            return $mapaCompradoresExacto[$codPadded];
+        }
+
+        if (isset($mapaCompradoresExacto[$codClean])) {
+            return $mapaCompradoresExacto[$codClean];
+        }
+
+        if ($nombreOriginal) {
+            $n = trim($nombreOriginal);
+            if (preg_match('/KARYNELL/i', $n)) return 'KARYNELL ARAQUE';
+            if (preg_match('/PEÑA|ALEJANDRO/i', $n)) return 'ALEJANDRO PEÑA';
+            if (preg_match('/YOLI|DUGARTE/i', $n)) return 'Dugarte Yoliys';
+            if (preg_match('/MARIA\s*J/i', $n)) return 'MARIA JOSE CONTRERAS';
+            if (preg_match('/DANIEL/i', $n)) return 'DANIEL (SURAKARNES)';
+            
+            if (preg_match('/Jeralth|Admin/i', $n)) {
+                return 'KARYNELL ARAQUE';
+            }
+            return $n;
+        }
+
+        return 'KARYNELL ARAQUE';
     }
 }

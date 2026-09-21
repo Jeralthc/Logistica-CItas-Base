@@ -1,5 +1,5 @@
 <?php
-// Sube a public_html/ y abre: https://citsur.Empresa Base.net/fix_routes.php
+// Sube a public_html/ y abre: https://citsur.suraki.net/fix_routes.php
 $root = realpath(__DIR__ . '/..');
 $routesDir = $root . '/routes';
 if (!is_dir($routesDir)) mkdir($routesDir, 0755, true);
@@ -32,7 +32,7 @@ Route::get(\'/prueba-sql/{orden}\', function ($orden) {
 
 /*
 |--------------------------------------------------------------------------
-| Rutas Oficiales del Sistema Empresa Base
+| Rutas Oficiales del Sistema Suraki
 |--------------------------------------------------------------------------
 */
 

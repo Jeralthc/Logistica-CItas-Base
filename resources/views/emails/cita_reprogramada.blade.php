@@ -59,7 +59,7 @@
                 </div>
                 @php
                     $sucursalesMap = [
-                        '0101' => 'Tu Empresa',
+                        '0101' => 'Hipersuraki',
                         '0102' => 'Depósito General',
                         '0111' => 'Producción',
                         '0115' => 'Insumos',
@@ -86,7 +86,7 @@
         </div>
         <div class="footer">
             <p>Este es un correo automático, por favor no respondas a esta dirección.</p>
-            <p>&copy; {{ date('Y') }} Logística Empresa Base. Todos los derechos reservados.</p>
+            <p>&copy; {{ date('Y') }} Logística Suraki. Todos los derechos reservados.</p>
         </div>
     </div>
 </body>

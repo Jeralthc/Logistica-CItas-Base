@@ -9,48 +9,31 @@ use App\Models\Operario;
 class LogisticaController extends Controller
 {
     /**
+     * Determina de forma segura y robusta si el sistema debe operar en modo API / erp_ordenes_sync.
+     * En producción o sin driver ODBC de SQL Server, SIEMPRE fuerza modo API.
+     */
+    public function esModoApi()
+    {
+        $host = request()->getHost();
+        if (str_contains($host, 'citsur.suraki.net') || str_contains($host, 'suraki.net')) {
+            return true;
+        }
+
+        if (!extension_loaded('pdo_sqlsrv') && !extension_loaded('sqlsrv')) {
+            return true;
+        }
+
+        $mode = config('app.erp_connection_mode') ?: env('ERP_CONNECTION_MODE', 'api');
+        return $mode === 'api';
+    }
+
+    /**
      * Traer todas las órdenes DPE para el monitor.
      */
     public function ordenesPendientes($forceDb = false)
     {
-        if (!$forceDb && env('ERP_CONNECTION_MODE') === 'api') {
-            try {
-                $ordenesSync = DB::table('erp_ordenes_sync')
-                    ->where('fecha_emision', '>=', '2026-06-01')
-                    ->orderBy('fecha_emision', 'desc')
-                    ->limit(2000)
-                    ->get(['numero_oc', 'resumen_json', 'estatus_habilitacion']);
-                
-                $citasFacturas = DB::table('appointments')
-                    ->whereNotIn('estatus', ['cancelada', 'anulada'])
-                    ->get(['numero_oc', 'numero_factura', 'factura_path'])
-                    ->keyBy('numero_oc');
-
-                $ordenesFinales = [];
-                foreach ($ordenesSync as $row) {
-                    if (empty(trim($row->resumen_json))) continue;
-                    
-                    $obj = json_decode($row->resumen_json, true);
-                    if ($obj && is_array($obj)) {
-                        $obj['estatus_habilitacion'] = $row->estatus_habilitacion;
-                        
-                        $numOc = $row->numero_oc;
-                        $obj['numero_factura'] = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->numero_factura : null;
-                        $obj['factura_url'] = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->factura_path)
-                            ? \Illuminate\Support\Facades\Storage::url($citasFacturas[$numOc]->factura_path)
-                            : null;
-                        
-                        $ordenesFinales[] = $obj;
-                    }
-                }
-                
-                return response()->json([
-                    'status' => 'Exitoso',
-                    'ordenes' => $ordenesFinales
-                ]);
-            } catch (\Throwable $e) {
-                return response()->json(['error' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
-            }
+        if (!$forceDb && $this->esModoApi()) {
+            return $this->ordenesPendientesSync();
         }
 
 
@@ -63,6 +46,20 @@ class LogisticaController extends Controller
                     MA_ODC.c_DESCRIPCION AS proveedor,
                     CAST(MA_ODC.c_OBSERVACION AS VARCHAR(MAX)) AS observacion,
                     MA_ODC.C_DESPACHAR AS destino,
+                    MA_ODC.c_CODPROVEEDOR AS Codigo_Proveedor,
+                    MA_ODC.c_CODCOMPRADOR AS Comprador_Interno,
+                    PROV.c_rif AS c_rif,
+                    MAX(COALESCE(
+                        NULLIF(LTRIM(RTRIM(PROV.c_email)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_ven)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_adm)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_vdd)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_fiscal)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_reg)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_depo)), ''),
+                        NULLIF(LTRIM(RTRIM(PROV.c_email_dep)), '')
+                    )) AS Email_Proveedor,
+                    PROV.c_telefono AS Telefono_Proveedor,
                     COUNT(TR_ODC.c_CODARTICULO) as cant_productos,
                     
                     -- Bultos para Secos
@@ -131,15 +128,21 @@ class LogisticaController extends Controller
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%')) THEN 1 ELSE 0 END) AS es_charcuteria,
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '13' THEN 1 ELSE 0 END) AS es_pescaderia,
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') THEN 1 ELSE 0 END) AS es_congelados
-                FROM MA_ODC 
-                INNER JOIN TR_ODC ON MA_ODC.c_DOCUMENTO = TR_ODC.c_DOCUMENTO 
-                INNER JOIN MA_PRODUCTOS ON TR_ODC.c_CODARTICULO = MA_PRODUCTOS.C_CODIGO
-                LEFT JOIN MA_GRUPOS ON MA_PRODUCTOS.c_grupo = MA_GRUPOS.c_codigo
-                LEFT JOIN MA_SUBGRUPOS ON MA_PRODUCTOS.c_subgrupo = MA_SUBGRUPOS.c_codigo
-                WHERE LTRIM(RTRIM(UPPER(MA_ODC.c_status))) IN ('DPE', 'DCO')
-                  AND LTRIM(RTRIM(UPPER(MA_ODC.C_DESPACHAR))) IN ('0101', '0102')
-                  AND MA_ODC.d_FECHA >= '2026-06-01'
-                GROUP BY MA_ODC.c_DOCUMENTO, MA_ODC.d_FECHA, MA_ODC.d_fecha_recepcion, MA_ODC.c_DESCRIPCION, CAST(MA_ODC.c_OBSERVACION AS VARCHAR(MAX)), MA_ODC.C_DESPACHAR
+                FROM MA_ODC WITH (NOLOCK)
+                INNER JOIN TR_ODC WITH (NOLOCK) ON MA_ODC.c_DOCUMENTO = TR_ODC.c_DOCUMENTO 
+                INNER JOIN MA_PRODUCTOS WITH (NOLOCK) ON TR_ODC.c_CODARTICULO = MA_PRODUCTOS.C_CODIGO
+                LEFT JOIN MA_GRUPOS WITH (NOLOCK) ON MA_PRODUCTOS.c_grupo = MA_GRUPOS.c_codigo
+                LEFT JOIN MA_SUBGRUPOS WITH (NOLOCK) ON MA_PRODUCTOS.c_subgrupo = MA_SUBGRUPOS.c_codigo
+                LEFT JOIN MA_PROVEEDORES PROV WITH (NOLOCK) ON MA_ODC.c_CODPROVEEDOR = PROV.c_codproveed
+                WHERE (
+                    LTRIM(RTRIM(UPPER(MA_ODC.c_status))) = 'DPE'
+                    OR (
+                        LTRIM(RTRIM(UPPER(MA_ODC.c_status))) = 'DCO' 
+                        AND MA_ODC.d_FECHA >= DATEADD(day, -30, GETDATE())
+                    )
+                )
+                AND LTRIM(RTRIM(UPPER(MA_ODC.C_DESPACHAR))) LIKE '01%'
+                GROUP BY MA_ODC.c_DOCUMENTO, MA_ODC.d_FECHA, MA_ODC.d_fecha_recepcion, MA_ODC.c_DESCRIPCION, CAST(MA_ODC.c_OBSERVACION AS VARCHAR(MAX)), MA_ODC.C_DESPACHAR, MA_ODC.c_CODPROVEEDOR, MA_ODC.c_CODCOMPRADOR, PROV.c_rif, PROV.c_telefono
                 ORDER BY MA_ODC.d_FECHA DESC
             ";
             
@@ -147,7 +150,20 @@ class LogisticaController extends Controller
             
             $citasFacturas = DB::table('appointments')
                 ->whereNotIn('estatus', ['cancelada', 'anulada'])
-                ->get(['numero_oc', 'numero_factura', 'factura_path'])
+                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at'])
+                ->keyBy('numero_oc');
+
+            $allOcs = array_map(fn($o) => trim($o->numero_oc ?? ''), $ordenes);
+            $emailLogs = DB::table('email_logs')
+                ->whereIn('numero_oc', $allOcs)
+                ->where('tipo_evento', 'odc_habilitada')
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->keyBy('numero_oc');
+
+            $syncRows = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', $allOcs)
+                ->get(['numero_oc', 'estatus_habilitacion', 'habilitada_por_user_id', 'fecha_emision', 'created_at', 'updated_at'])
                 ->keyBy('numero_oc');
 
             foreach ($ordenes as $o) {
@@ -156,70 +172,586 @@ class LogisticaController extends Controller
                 $o->factura_url = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->factura_path)
                     ? \Illuminate\Support\Facades\Storage::url($citasFacturas[$numOc]->factura_path)
                     : null;
+                
+                $fEnvio = isset($emailLogs[$numOc]) ? $emailLogs[$numOc]->created_at : null;
+                if (!$fEnvio && isset($syncRows[$numOc])) {
+                    $sRow = $syncRows[$numOc];
+                    $fueHab = in_array($sRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($sRow->habilitada_por_user_id);
+                    if ($fueHab && !empty($sRow->updated_at) && $sRow->updated_at != $sRow->created_at) {
+                        $fEnvio = $sRow->updated_at;
+                    } elseif (!empty($sRow->fecha_emision)) {
+                        $fEnvio = $sRow->fecha_emision;
+                    } elseif (!empty($sRow->created_at)) {
+                        $fEnvio = $sRow->created_at;
+                    }
+                }
+                if (!$fEnvio && !empty($o->fecha_emision)) {
+                    $fEnvio = $o->fecha_emision;
+                }
+                $o->fecha_envio_comprador = $fEnvio;
+                $o->fecha_registro_cita = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->created_at : null;
+            }
+
+            $authUser = auth('web')->user() ?: request()->user();
+            $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+
+            if ($isTestAuthorized) {
+                $testSync = DB::table('erp_ordenes_sync')
+                    ->where('numero_oc', 'like', 'TEST-%')
+                    ->get();
+                foreach ($testSync as $tRow) {
+                    $obj = json_decode($tRow->resumen_json);
+                    if ($obj) {
+                        $obj->numero_oc = $tRow->numero_oc;
+                        $obj->estatus_habilitacion = $tRow->estatus_habilitacion;
+                        $obj->numero_factura = null;
+                        $obj->factura_url = null;
+                        $ordenes[] = $obj;
+                    }
+                }
+            } else {
+                $ordenes = array_values(array_filter($ordenes, function($o) {
+                    $num = trim($o->numero_oc ?? '');
+                    return !str_starts_with(strtoupper($num), 'TEST-');
+                }));
             }
 
             return response()->json(['status' => 'Exitoso', 'ordenes' => $ordenes]);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Fallo conexión SQLSRV directa en ordenesPendientes: " . $e->getMessage() . ". Usando fallback erp_ordenes_sync.");
+            return $this->ordenesPendientesSync();
         }
     }
 
     /**
-     * Buscar orden completa: resumen + productos + factura + fechas + tiempo óptimo.
+     * Lectura de órdenes desde erp_ordenes_sync de forma local y segura
      */
-    public function buscarOrdenCompleta($orden, $forceDb = false)
+    private function ordenesPendientesSync()
     {
-        if (!$forceDb && env('ERP_CONNECTION_MODE') === 'api') {
-            try {
+        try {
+            $authUser = auth('web')->user() ?: request()->user();
+            $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+
+            $querySync = DB::table('erp_ordenes_sync')
+                ->where(function($q) {
+                    $q->where('fecha_emision', '>=', '2026-06-01')
+                      ->orWhereNull('fecha_emision')
+                      ->orWhere('fecha_emision', '');
+                });
+
+            if (!$isTestAuthorized) {
+                $querySync->where(function($q) {
+                    $q->where('numero_oc', 'NOT LIKE', 'TEST-%')
+                      ->where(function($sub) {
+                          $sub->whereNull('rif_proveedor')
+                              ->orWhereNotIn('rif_proveedor', ['J-999999999', 'J999999999']);
+                      });
+                });
+            }
+
+            $ordenesSync = $querySync
+                ->orderByRaw("CASE WHEN fecha_emision IS NULL OR fecha_emision = '' THEN 1 ELSE 0 END, fecha_emision DESC, numero_oc DESC")
+                ->limit(2000)
+                ->get(['numero_oc', 'resumen_json', 'estatus_habilitacion', 'rif_proveedor', 'updated_at']);
+            
+            if (empty($ordenesSync) || (is_object($ordenesSync) && method_exists($ordenesSync, 'isEmpty') && $ordenesSync->isEmpty()) || (is_array($ordenesSync) && count($ordenesSync) === 0)) {
+                $apiUrl = config('app.erp_api_url') ?: env('ERP_API_URL', 'https://citsur.suraki.net/api');
+                $token = config('app.erp_api_token') ?: env('ERP_API_TOKEN', 'SurakiSecreto2026');
+                if ($apiUrl) {
+                    try {
+                        $apiResponse = \Illuminate\Support\Facades\Http::withToken($token)
+                            ->withoutVerifying()
+                            ->timeout(15)
+                            ->get("{$apiUrl}/erp/ordenes-pendientes");
+                            
+                        if ($apiResponse->successful()) {
+                            $todas = $apiResponse->json()['ordenes'] ?? [];
+                            $now = now();
+                            $insertData = [];
+                            foreach ($todas as $o) {
+                                $numOc = $o['Numero_OC'] ?? $o['numero_oc'] ?? null;
+                                if (!$numOc) continue;
+                                $insertData[] = [
+                                    'numero_oc' => $numOc,
+                                    'fecha_emision' => $o['fecha_odc'] ?? $o['Fecha_Emision'] ?? $o['fecha_emision'] ?? null,
+                                    'fecha_recepcion' => $o['fecha_recepcion'] ?? null,
+                                    'proveedor' => $o['Nombre_Proveedor'] ?? $o['proveedor'] ?? null,
+                                    'destino' => $o['Muelle_Destino'] ?? $o['destino'] ?? null,
+                                    'resumen_json' => json_encode($o),
+                                    'detalles_json' => json_encode($o['detalles'] ?? []),
+                                    'categoria_sugerida' => \App\Services\AppointmentDurationService::detectarCategoria($o),
+                                    'peso_estimado_ton' => \App\Services\AppointmentDurationService::estimarPesoToneladas($o),
+                                    'estatus_habilitacion' => $o['estatus_habilitacion'] ?? 'pendiente',
+                                    'created_at' => $now,
+                                    'updated_at' => $now,
+                                ];
+                            }
+                            foreach (array_chunk($insertData, 100) as $chunk) {
+                                DB::table('erp_ordenes_sync')->upsert($chunk, ['numero_oc'], [
+                                    'fecha_emision', 'fecha_recepcion', 'proveedor', 'destino',
+                                    'detalles_json', 'categoria_sugerida', 'peso_estimado_ton', 'updated_at'
+                                ]);
+                            }
+                            $ordenesSync = DB::table('erp_ordenes_sync')
+                                ->where(function($q) {
+                                    $q->where('fecha_emision', '>=', '2026-06-01')
+                                      ->orWhereNull('fecha_emision')
+                                      ->orWhere('fecha_emision', '');
+                                })
+                                ->orderByRaw("CASE WHEN fecha_emision IS NULL OR fecha_emision = '' THEN 1 ELSE 0 END, fecha_emision DESC, numero_oc DESC")
+                                ->limit(2000)
+                                ->get(['numero_oc', 'resumen_json', 'estatus_habilitacion', 'updated_at']);
+                        }
+                    } catch (\Exception $ex) {}
+                }
+            }
+            
+            $citasFacturas = DB::table('appointments')
+                ->whereNotIn('estatus', ['cancelada', 'anulada'])
+                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at', 'updated_at', 'estatus', 'fecha_completada', 'completada_por_nombre'])
+                ->keyBy('numero_oc');
+
+            $emailLogs = DB::table('email_logs')
+                ->where('tipo_evento', 'odc_habilitada')
+                ->orderBy('created_at', 'desc')
+                ->get(['numero_oc', 'created_at'])
+                ->keyBy('numero_oc');
+
+            $ordenesFinales = [];
+            foreach ($ordenesSync as $row) {
+                if (empty(trim($row->resumen_json))) continue;
+                
+                $obj = json_decode($row->resumen_json, true);
+                if ($obj && is_array($obj)) {
+                    $obj['estatus_habilitacion'] = $row->estatus_habilitacion;
+                    $obj['numero_oc'] = $obj['numero_oc'] ?? $obj['Numero_OC'] ?? $row->numero_oc;
+                    $obj['proveedor'] = $obj['proveedor'] ?? $obj['Nombre_Proveedor'] ?? $row->proveedor ?? '';
+                    $obj['destino'] = $obj['destino'] ?? $obj['Muelle_Destino'] ?? $row->destino ?? '0101';
+                    $obj['fecha_emision'] = $obj['fecha_emision'] ?? $obj['Fecha_Emision'] ?? $row->fecha_emision ?? '';
+                    $obj['fecha_recepcion'] = $obj['fecha_recepcion'] ?? $obj['Fecha_Recepcion'] ?? $row->fecha_recepcion ?? '';
+                    $obj['es_secos'] = $obj['es_secos'] ?? $row->es_secos ?? 1;
+                    $obj['es_perecederos'] = $obj['es_perecederos'] ?? $row->es_perecederos ?? 0;
+                    $obj['es_fruver'] = $obj['es_fruver'] ?? $row->es_fruver ?? 0;
+                    
+                    $numOc = $row->numero_oc;
+                    $obj['numero_factura'] = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->numero_factura : null;
+                    $obj['factura_url'] = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->factura_path)
+                        ? \Illuminate\Support\Facades\Storage::url($citasFacturas[$numOc]->factura_path)
+                        : null;
+                    
+                    $posiblesNum = array_values(array_unique(array_filter([
+                        $numOc,
+                        preg_replace('/^E/i', '', $numOc),
+                        ltrim(preg_replace('/^E/i', '', $numOc), '0'),
+                        str_pad(ltrim(preg_replace('/^E/i', '', $numOc), '0'), 9, '0', STR_PAD_LEFT),
+                    ])));
+                    
+                    $fechaEnvio = null;
+                    foreach ($posiblesNum as $pNum) {
+                        if (isset($emailLogs[$pNum])) {
+                            $fechaEnvio = $emailLogs[$pNum]->created_at;
+                            break;
+                        }
+                    }
+                    
+                    if (!$fechaEnvio && $row) {
+                        $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id);
+                        if ($fueHabilitada && !empty($row->updated_at) && $row->updated_at != $row->created_at) {
+                            $fechaEnvio = $row->updated_at;
+                        } elseif (!empty($row->fecha_emision)) {
+                            $fechaEnvio = $row->fecha_emision;
+                        } elseif (!empty($row->created_at)) {
+                            $fechaEnvio = $row->created_at;
+                        }
+                    }
+                    $obj['fecha_envio_comprador'] = $fechaEnvio;
+                    $obj['fecha_registro_cita'] = isset($citasFacturas[$numOc]) 
+                        ? $citasFacturas[$numOc]->created_at 
+                        : null;
+                    $obj['fecha_completada'] = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->estatus === 'finalizada')
+                        ? ($citasFacturas[$numOc]->fecha_completada ?? $citasFacturas[$numOc]->updated_at)
+                        : null;
+                    $obj['completada_por_nombre'] = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->estatus === 'finalizada')
+                        ? ($citasFacturas[$numOc]->completada_por_nombre ?? 'Recepción')
+                        : null;
+                    
+                    $ordenesFinales[] = $obj;
+                }
+            }
+
+            usort($ordenesFinales, function($a, $b) {
+                $dateA = $a['fecha_emision'] ?? $a['fecha_odc'] ?? $a['Fecha_Emision'] ?? '';
+                $dateB = $b['fecha_emision'] ?? $b['fecha_odc'] ?? $b['Fecha_Emision'] ?? '';
+                if ($dateA === $dateB) {
+                    return strcmp($b['numero_oc'] ?? '', $a['numero_oc'] ?? '');
+                }
+                return strcmp($dateB, $dateA);
+            });
+            
+            return response()->json([
+                'status' => 'Exitoso',
+                'ordenes' => $ordenesFinales
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine()], 500);
+        }
+    }
+
+    /**
+     * Buscar orden en base de datos local erp_ordenes_sync (Modo Seguro / Web)
+     */
+    public function buscarOrdenSync($orden)
+    {
+        try {
+                if (str_starts_with(strtoupper($orden), 'TEST-')) {
+                    $authUser = auth('web')->user() ?: request()->user();
+                    $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+                    if (!$isTestAuthorized) {
+                        return response()->json(['error' => 'Orden de Compra no encontrada.'], 404);
+                    }
+                }
+
+                if (str_starts_with(strtoupper($orden), 'TI-')) {
+                    $citaTI = DB::table('appointments')->where('numero_oc', $orden)->first();
+                    if ($citaTI) {
+                        return response()->json([
+                            'status' => 'Exitoso',
+                            'es_traslado_interno' => true,
+                            'nombre_proveedor' => $citaTI->proveedor,
+                            'resumen' => [
+                                'Numero_OC' => $citaTI->numero_oc,
+                                'Nombre_Proveedor' => $citaTI->proveedor,
+                                'Codigo_Proveedor' => $citaTI->rif_proveedor ?: 'J-10715201',
+                                'Muelle_Destino' => $citaTI->muelle_asignado,
+                                'fecha_odc' => $citaTI->created_at,
+                                'fecha_recepcion' => $citaTI->fecha_cita,
+                                'status_odc' => $citaTI->estatus,
+                                'observacion_odc' => $citaTI->observaciones ?: 'Traslado Interno de Galpón',
+                            ],
+                            'detalles' => [],
+                            'tiempos' => ['tiempo_optimo_minutos' => $citaTI->duracion_minutos ?: 60],
+                        ]);
+                    }
+                }
+
                 $ordenLimpia = preg_replace('/^E/i', '', $orden);
                 $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+                $ordenConE = 'E' . $ordenPad;
+                $ordenLimpiaConE = 'E' . $ordenLimpia;
                 
                 $row = DB::table('erp_ordenes_sync')
-                    ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad])
+                    ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE, $ordenLimpiaConE])
                     ->first();
                     
                 if (!$row) {
-                    return response()->json(['error' => 'La Orden de Compra no existe en el ERP o no ha sido sincronizada.'], 404);
+                    // Si no está en la BD local, intentar sincronizar dinámicamente desde la API remota
+                    $apiUrl = env('ERP_API_URL', 'https://citsur.suraki.net/api');
+                    $token = env('ERP_API_TOKEN', 'SurakiSecreto2026');
+                    
+                    if ($apiUrl) {
+                        try {
+                            $apiResponse = \Illuminate\Support\Facades\Http::withToken($token)
+                                ->withoutVerifying()
+                                ->timeout(10)
+                                ->get("{$apiUrl}/erp/ordenes-pendientes");
+                                
+                            if ($apiResponse->successful()) {
+                                $todas = $apiResponse->json()['ordenes'] ?? [];
+                                $now = now();
+                                $insertData = [];
+                                
+                                foreach ($todas as $o) {
+                                    $numOc = $o['Numero_OC'] ?? $o['numero_oc'] ?? null;
+                                    if (!$numOc) continue;
+                                    $insertData[] = [
+                                        'numero_oc' => $numOc,
+                                        'fecha_emision' => $o['fecha_odc'] ?? $o['Fecha_Emision'] ?? null,
+                                        'fecha_recepcion' => $o['fecha_recepcion'] ?? null,
+                                        'proveedor' => $o['Nombre_Proveedor'] ?? $o['proveedor'] ?? null,
+                                        'destino' => $o['Muelle_Destino'] ?? $o['destino'] ?? null,
+                                        'resumen_json' => json_encode($o),
+                                        'detalles_json' => json_encode($o['detalles'] ?? []),
+                                        'categoria_sugerida' => \App\Services\AppointmentDurationService::detectarCategoria($o),
+                                        'peso_estimado_ton' => \App\Services\AppointmentDurationService::estimarPesoToneladas($o),
+                                        'estatus_habilitacion' => $o['estatus_habilitacion'] ?? 'pendiente',
+                                        'created_at' => $now,
+                                        'updated_at' => $now,
+                                    ];
+                                }
+                                
+                                foreach (array_chunk($insertData, 100) as $chunk) {
+                                    DB::table('erp_ordenes_sync')->upsert($chunk, ['numero_oc'], [
+                                        'fecha_emision', 'fecha_recepcion', 'proveedor', 'destino',
+                                        'resumen_json', 'detalles_json', 'categoria_sugerida', 'peso_estimado_ton', 'updated_at'
+                                    ]);
+                                }
+                                
+                                $row = DB::table('erp_ordenes_sync')
+                                    ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE, $ordenLimpiaConE])
+                                    ->first();
+                            }
+                        } catch (\Exception $ex) {}
+                    }
+                }
+                
+                if (!$row) {
+                    if (!$this->esModoApi() && (extension_loaded('sqlsrv') || extension_loaded('pdo_sqlsrv'))) {
+                        try {
+                            return $this->buscarOrdenCompleta($orden, true);
+                        } catch (\Throwable $eFallback) {
+                            \Illuminate\Support\Facades\Log::error("Fallo fallback DB al buscar {$orden}: " . $eFallback->getMessage());
+                        }
+                    }
+                    return response()->json(['error' => "La Orden de Compra {$orden} no existe en el sistema o no ha sido sincronizada."], 404);
                 }
                 
                 $detalles = json_decode($row->detalles_json, true) ?: [];
                 $resumen = json_decode($row->resumen_json, true) ?: [];
                 
+                $destino = trim($row->destino ?? $resumen['Muelle_Destino'] ?? $resumen['destino'] ?? '0101');
+                
+                $dptosPerecederosFruver = ['10', '11', '12', '13', '14', '15', '21', '23'];
+                $esPerecederoOFruver = !empty($row->es_perecederos) || !empty($row->es_fruver) || !empty($resumen['es_perecederos']) || !empty($resumen['es_fruver']);
+
+                if (!$esPerecederoOFruver) {
+                    foreach ($detalles as $item) {
+                        $dpto = trim(is_array($item) ? ($item['c_departamento'] ?? $item['departamento'] ?? '') : ($item->c_departamento ?? ''));
+                        if (in_array($dpto, $dptosPerecederosFruver)) {
+                            $esPerecederoOFruver = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Sedes o depósitos de tiendas que no reciben agendamiento de proveedores en muelle central
+                $destinosNoPermitidos = ['0130', '0131', '01993'];
+                if (!empty($destino) && in_array($destino, $destinosNoPermitidos)) {
+                    $sucursalMap = [
+                        '0130' => '30 DEP SUCURSALES / TIENDAS',
+                        '0131' => '31 DEP SUCURSALES / TIENDAS',
+                        '01993' => '993 SEDE CC YUAN LIN',
+                    ];
+                    $nomDep = $sucursalMap[$destino] ?? ("Sede " . $destino);
+                    return response()->json([
+                        'error' => "La Orden de Compra {$orden} está asignada a la sede \"{$nomDep}\" (Código: {$destino}). La recepción de mercancía y agendamiento de citas se gestiona únicamente a través de los centros de distribución y depósitos operativos de Suraki."
+                    ], 422);
+                }
+
                 $citaActiva = DB::table('appointments')
                     ->where('numero_oc', $row->numero_oc)
                     ->whereNotIn('estatus', ['cancelada', 'anulada'])
                     ->orderBy('created_at', 'desc')
                     ->first();
 
-                $rif = $resumen['Codigo_Proveedor'] ?? null;
+                $rif = $resumen['Codigo_Proveedor'] ?? $row->rif_proveedor ?? null;
+                $rifLimpio = strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($rif ?? '')));
                 $proveedorEmail = $resumen['Email_Proveedor'] ?? null;
                 $proveedorTelefono = $resumen['Telefono_Proveedor'] ?? '';
                 $proveedorAsesor = '';
                 $contactoId = null;
+                $contactosRegistrados = [];
+                $user = null;
+                $emailsDetectadosErp = $resumen['emails_detectados_erp'] ?? [];
+                if ($proveedorEmail && filter_var($proveedorEmail, FILTER_VALIDATE_EMAIL) && !in_array(strtolower($proveedorEmail), $emailsDetectadosErp)) {
+                    array_unshift($emailsDetectadosErp, strtolower($proveedorEmail));
+                }
 
-                if ($rif) {
-                    $user = DB::table('users')->where('username', $rif)->first();
+                if ($rifLimpio) {
+                    // Priorizar el usuario con username exacto (c_codproveed) EXCLUSIVAMENTE con rol proveedor
+                    $user = DB::table('users')
+                        ->where('role', 'proveedor')
+                        ->where(function($q) use ($rifLimpio) {
+                            $q->where('username', $rifLimpio)->orWhere('rif', $rifLimpio);
+                        })
+                        ->first();
+
                     if ($user) {
-                        $proveedorEmail = $user->email;
+                        if (!empty($user->email) && !str_contains($user->email, '@proveedor.suraki.net')) {
+                            $proveedorEmail = trim($user->email);
+                        }
                         $proveedorAsesor = $user->name;
                         
-                        $contacto = DB::table('proveedor_contactos')
-                            ->where('user_id', $user->id)
-                            ->orderBy('id', 'desc')
+                        // Obtener contactos de TODOS los usuarios vinculados a este RIF de proveedor
+                        $proveedorUserIds = DB::table('users')
+                            ->where('role', 'proveedor')
+                            ->where(function($q) use ($rifLimpio) {
+                                $q->where('username', $rifLimpio)->orWhere('rif', $rifLimpio);
+                            })
+                            ->pluck('id');
+
+                        $contactosRegistrados = DB::table('proveedor_contactos')
+                            ->whereIn('user_id', $proveedorUserIds)
+                            ->select('id', 'nombre', 'email', 'telefono')
+                            ->get();
+
+                        $contactoValido = $contactosRegistrados
+                            ->where('email', '!=', '')
+                            ->reject(fn($c) => str_contains($c->email, '@proveedor.suraki.net'))
                             ->first();
-                        if ($contacto) {
-                            $proveedorEmail = $contacto->email ?: $proveedorEmail;
-                            $proveedorTelefono = $contacto->telefono ?: $proveedorTelefono;
-                            $proveedorAsesor = $contacto->nombre ?: $proveedorAsesor;
-                            $contactoId = $contacto->id;
+
+                        if ($contactoValido) {
+                            $proveedorEmail = trim($contactoValido->email) ?: $proveedorEmail;
+                            $proveedorTelefono = trim($contactoValido->telefono) ?: $proveedorTelefono;
+                            $proveedorAsesor = trim($contactoValido->nombre) ?: $proveedorAsesor;
+                            $contactoId = $contactoValido->id;
                         }
                     }
                 }
 
-                // Return same structure as DB mode
-                return response()->json(array_merge([
+                // Fallback directo a MA_PROVEEDORES en ERP escaneando TODOS los 8 campos de correo
+                if ($rifLimpio) {
+                    try {
+                        $provErp = DB::connection('sqlsrv')->selectOne("
+                            SELECT 
+                                COALESCE(
+                                    NULLIF(LTRIM(RTRIM(c_email)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_ven)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_adm)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_vdd)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_fiscal)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_reg)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_depo)), ''),
+                                    NULLIF(LTRIM(RTRIM(c_email_dep)), '')
+                                ) AS c_email,
+                                LTRIM(RTRIM(c_email)) AS email_main,
+                                LTRIM(RTRIM(c_email_ven)) AS email_ven,
+                                LTRIM(RTRIM(c_email_adm)) AS email_adm,
+                                LTRIM(RTRIM(c_email_vdd)) AS email_vdd,
+                                LTRIM(RTRIM(c_email_fiscal)) AS email_fiscal,
+                                LTRIM(RTRIM(c_email_reg)) AS email_reg,
+                                LTRIM(RTRIM(c_email_depo)) AS email_depo,
+                                LTRIM(RTRIM(c_email_dep)) AS email_dep,
+                                LTRIM(RTRIM(c_telefono)) AS c_telefono, 
+                                LTRIM(RTRIM(c_descripcio)) AS c_descripcio 
+                            FROM MA_PROVEEDORES WITH (NOLOCK)
+                            WHERE c_codproveed = ? OR c_rif LIKE ?
+                            ORDER BY CASE WHEN c_codproveed = ? THEN 1 ELSE 2 END
+                        ", [$rif, "%{$rifLimpio}%", $rif]);
+
+                        if ($provErp) {
+                            if (!empty($provErp->c_email)) {
+                                $proveedorEmail = trim($provErp->c_email);
+                            }
+                            $proveedorTelefono = $proveedorTelefono ?: trim($provErp->c_telefono);
+
+                            $emailsRaw = [
+                                $provErp->email_main ?? '',
+                                $provErp->email_ven ?? '',
+                                $provErp->email_adm ?? '',
+                                $provErp->email_vdd ?? '',
+                                $provErp->email_fiscal ?? '',
+                                $provErp->email_reg ?? '',
+                                $provErp->email_depo ?? '',
+                                $provErp->email_dep ?? '',
+                            ];
+                            foreach ($emailsRaw as $em) {
+                                $em = strtolower(trim((string)$em));
+                                if ($em !== '' && filter_var($em, FILTER_VALIDATE_EMAIL) && !in_array($em, $emailsDetectadosErp)) {
+                                    $emailsDetectadosErp[] = $em;
+                                }
+                            }
+
+                            if ((empty($proveedorEmail) || str_contains($proveedorEmail, '@proveedor.suraki.net')) && !empty($emailsDetectadosErp)) {
+                                $proveedorEmail = $emailsDetectadosErp[0];
+                                if (!empty($user) && str_contains($user->email, '@proveedor.suraki.net')) {
+                                    DB::table('users')->where('id', $user->id)->update(['email' => $proveedorEmail]);
+                                    $user->email = $proveedorEmail;
+                                }
+                            }
+
+                            // Sincronizar todos los correos detectados en proveedor_contactos si el usuario existe
+                            if ($user && count($emailsDetectadosErp) > 0) {
+                                foreach ($emailsDetectadosErp as $emReal) {
+                                    \App\Models\ProveedorContacto::firstOrCreate(
+                                        ['user_id' => $user->id, 'email' => $emReal],
+                                        ['nombre' => $user->name ?: ($resumen['Nombre_Proveedor'] ?? 'Contacto'), 'telefono' => $proveedorTelefono ?: '0000000000']
+                                    );
+                                }
+                                $contactosRegistrados = DB::table('proveedor_contactos')
+                                    ->where('user_id', $user->id)
+                                    ->select('id', 'nombre', 'email', 'telefono')
+                                    ->get();
+                            }
+                        }
+                    } catch (\Throwable $eEmail) {}
+                }
+
+                // Auto-crear cuenta de proveedor si no existía aún (excluyendo nombres reservados de sistema)
+                $nombresReservados = ['ADMIN', 'ROOT', 'COMPRADOR', 'RECEPTOR', 'GENERAL', 'SISTEMAS', 'TEST'];
+                if ($rifLimpio && empty($user) && !in_array($rifLimpio, $nombresReservados)) {
+                    try {
+                        $emailFinal = (!empty($proveedorEmail) && !str_contains($proveedorEmail, '@proveedor.suraki.net')) 
+                            ? $proveedorEmail 
+                            : (!empty($emailsDetectadosErp) ? $emailsDetectadosErp[0] : strtolower($rifLimpio) . '@proveedor.suraki.net');
+
+                        $uNew = \App\Models\User::create([
+                            'name' => $resumen['Nombre_Proveedor'] ?? $row->proveedor ?? 'Proveedor ' . $rifLimpio,
+                            'username' => $rifLimpio,
+                            'rif' => $rifLimpio,
+                            'email' => $emailFinal,
+                            'role' => 'proveedor',
+                            'password' => \Illuminate\Support\Facades\Hash::make($rifLimpio),
+                        ]);
+                        if (!empty($emailFinal) && !str_contains($emailFinal, '@proveedor.suraki.net')) {
+                            \App\Models\ProveedorContacto::create([
+                                'user_id' => $uNew->id,
+                                'nombre' => $uNew->name,
+                                'email' => $emailFinal,
+                                'telefono' => $proveedorTelefono ?: '0000000000',
+                            ]);
+                        }
+                        $user = $uNew;
+                    } catch (\Throwable $eUser) {}
+                }
+
+                $emailLogs = DB::table('email_logs')
+                    ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+                    ->orderBy('created_at', 'desc')
+                    ->get(['id', 'email_destino', 'vendedor_nombre', 'tipo_evento', 'estatus', 'error_mensaje', 'created_at']);
+
+                $habilitadaInfo = null;
+                if ($row && $row->habilitada_por_user_id) {
+                    $uComp = DB::table('users')->where('id', $row->habilitada_por_user_id)->first();
+                    if ($uComp) {
+                        $habilitadaInfo = [
+                            'nombre' => $uComp->name,
+                            'email' => $uComp->email,
+                            'fecha' => $row->updated_at ?? $row->created_at
+                        ];
+                    }
+                }
+
+                $emailLogHabilitada = $emailLogs->where('tipo_evento', 'odc_habilitada')->first();
+                $fechaEnvioComprador = $emailLogHabilitada ? $emailLogHabilitada->created_at : null;
+                if (!$fechaEnvioComprador && $row) {
+                    $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id);
+                    if ($fueHabilitada && !empty($row->updated_at) && $row->updated_at != $row->created_at) {
+                        $fechaEnvioComprador = $row->updated_at;
+                    } elseif (!empty($row->fecha_emision)) {
+                        $fechaEnvioComprador = $row->fecha_emision;
+                    } elseif (!empty($row->created_at)) {
+                        $fechaEnvioComprador = $row->created_at;
+                    }
+                }
+                $fechaRegistroCita = $citaActiva ? $citaActiva->created_at : null;
+                $fechaCompletada = ($citaActiva && $citaActiva->estatus === 'finalizada') 
+                    ? ($citaActiva->fecha_completada ?? $citaActiva->updated_at) 
+                    : null;
+                $completadaPorNombre = ($citaActiva && $citaActiva->estatus === 'finalizada') 
+                    ? ($citaActiva->completada_por_nombre ?? 'Recepción') 
+                    : null;
+
+                // Return same structure as DB mode (computed database fields take priority over raw JSON)
+                return response()->json(array_merge($resumen, [
                     'status' => 'Exitoso',
                     'orden_original' => $row->numero_oc,
+                    'estatus_habilitacion' => $row->estatus_habilitacion ?? 'pendiente',
+                    'habilitada_info' => $habilitadaInfo,
+                    'fecha_envio_comprador' => $fechaEnvioComprador,
+                    'fecha_registro_cita' => $fechaRegistroCita,
+                    'fecha_completada' => $fechaCompletada,
+                    'completada_por_nombre' => $completadaPorNombre,
+                    'email_logs' => $emailLogs,
                     'detalles' => $detalles,
                     'tipo_mercancia' => $citaActiva ? $citaActiva->tipo_mercancia : null,
                     'tipo_vehiculo' => $citaActiva ? $citaActiva->tipo_vehiculo : null,
@@ -229,10 +761,64 @@ class LogisticaController extends Controller
                     'proveedor_telefono' => $proveedorTelefono,
                     'proveedor_asesor' => $proveedorAsesor,
                     'contacto_id' => $contactoId,
-                ], $resumen));
-            } catch (\Exception $e) {
+                    'contactos_registrados' => $contactosRegistrados ?? [],
+                    'emails_detectados_erp' => array_slice(array_values(array_unique($emailsDetectadosErp)), 0, 3),
+                ]));
+            } 
+            catch (\Throwable $e) {
                 return response()->json(['error' => 'Fallo al leer orden sincronizada: ' . $e->getMessage()], 500);
             }
+    }
+
+    /**
+     * Buscar orden completa: resumen + productos + factura + fechas + tiempo óptimo.
+     */
+    public function buscarOrdenCompleta($orden, $forceDb = false)
+    {
+        if (str_starts_with(strtoupper($orden), 'TEST-')) {
+            $authUser = auth('web')->user() ?: request()->user();
+            $isTestAuthorized = $authUser && ($authUser->role === 'admin' || in_array($authUser->username, ['Compras.Juan', 'PROV.PRUEBA']));
+            if (!$isTestAuthorized) {
+                return response()->json(['error' => 'Orden de Compra no encontrada.'], 404);
+            }
+            return $this->buscarOrdenSync($orden);
+        }
+
+        if (str_starts_with(strtoupper($orden), 'TI-')) {
+            $citaTI = DB::table('appointments')->where('numero_oc', strtoupper($orden))->first();
+            if ($citaTI) {
+                return response()->json([
+                    'status' => 'Exitoso',
+                    'nombre_proveedor' => $citaTI->proveedor,
+                    'resumen' => [
+                        'Numero_OC' => $citaTI->numero_oc,
+                        'Nombre_Proveedor' => $citaTI->proveedor,
+                        'Codigo_Proveedor' => $citaTI->rif_proveedor ?: 'J-10715201',
+                        'Comprador_Interno' => 'TRASLADO INTERNO',
+                        'Muelle_Destino' => $citaTI->muelle_asignado,
+                        'fecha_odc' => $citaTI->created_at,
+                        'fecha_recepcion' => $citaTI->fecha_cita,
+                        'status_odc' => $citaTI->estatus,
+                        'observacion_odc' => $citaTI->observaciones ?: 'Traslado Interno de Galpón',
+                    ],
+                    'detalles' => [],
+                    'factura_proveedor' => null,
+                    'factura_path' => null,
+                    'fecha_orden' => $citaTI->created_at,
+                    'fecha_recepcion' => $citaTI->fecha_cita,
+                    'status_orden' => $citaTI->estatus,
+                    'status_texto' => 'Traslado Interno',
+                    'tipo_vehiculo' => $citaTI->tipo_vehiculo ?: 'camion_350',
+                    'tiempos' => [
+                        'tiempo_optimo_minutos' => $citaTI->duracion_minutos ?: 60,
+                        'operarios_usados' => 2
+                    ],
+                ]);
+            }
+        }
+
+        if (!$forceDb && $this->esModoApi()) {
+            return $this->buscarOrdenSync($orden);
         }
 
         try {
@@ -248,8 +834,25 @@ class LogisticaController extends Controller
                     O.c_CODPROVEEDOR AS Codigo_Proveedor,
                     P.c_descripcio AS Nombre_Proveedor,
                     P.c_telefono AS Telefono_Proveedor,
-                    P.c_email AS Email_Proveedor,
-                    P.CS_COMPRADOR AS Comprador_Interno,
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(P.c_email)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_ven)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_adm)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_vdd)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_fiscal)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_reg)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_depo)), ''),
+                        NULLIF(LTRIM(RTRIM(P.c_email_dep)), '')
+                    ) AS Email_Proveedor,
+                    P.c_email AS prov_email_main,
+                    P.c_email_ven AS prov_email_ven,
+                    P.c_email_adm AS prov_email_adm,
+                    P.c_email_vdd AS prov_email_vdd,
+                    P.c_email_fiscal AS prov_email_fiscal,
+                    P.c_email_reg AS prov_email_reg,
+                    P.c_email_depo AS prov_email_depo,
+                    P.c_email_dep AS prov_email_dep,
+                    COALESCE(NULLIF(LTRIM(RTRIM(O.c_CODCOMPRADOR)), ''), NULLIF(LTRIM(RTRIM(P.CS_COMPRADOR)), '')) AS Comprador_Interno,
                     O.C_DESPACHAR AS Muelle_Destino,
                     O.d_FECHA AS fecha_odc,
                     O.d_fecha_recepcion AS fecha_recepcion,
@@ -306,6 +909,31 @@ class LogisticaController extends Controller
                 WHERE D.c_DOCUMENTO = ?
                 ORDER BY D.c_CODARTICULO
             ", [$documentoReal]);
+
+            $destinoReal = trim($odcData[0]->Muelle_Destino ?? '0101');
+            $dptosPerecederosFruver = ['10', '11', '12', '13', '14', '15', '21', '23'];
+            $esPerecederoOFruver = false;
+            foreach ($detalles as $item) {
+                $dpto = trim($item->c_departamento ?? '');
+                if (in_array($dpto, $dptosPerecederosFruver)) {
+                    $esPerecederoOFruver = true;
+                    break;
+                }
+            }
+
+            // Sedes o depósitos de tiendas que no reciben agendamiento de proveedores en muelle central
+            $destinosNoPermitidos = ['0130', '0131', '01993'];
+            if (!empty($destinoReal) && in_array($destinoReal, $destinosNoPermitidos)) {
+                $sucursalMap = [
+                    '0130' => '30 DEP SUCURSALES / TIENDAS',
+                    '0131' => '31 DEP SUCURSALES / TIENDAS',
+                    '01993' => '993 SEDE CC YUAN LIN',
+                ];
+                $nomDep = $sucursalMap[$destinoReal] ?? ("Sede " . $destinoReal);
+                return response()->json([
+                    'error' => "La Orden de Compra {$orden} está asignada a la sede \"{$nomDep}\" (Código: {$destinoReal}). La recepción de mercancía y agendamiento de citas se gestiona únicamente a través de los centros de distribución y depósitos operativos de Suraki."
+                ], 422);
+            }
 
             $totalCajas = 0;
             $totalKgPerecederos = 0;
@@ -428,9 +1056,36 @@ class LogisticaController extends Controller
             // Completar resumen para frontend
             $datosResumen['Nombre_Proveedor'] = trim($odcData[0]->Nombre_Proveedor);
             $datosResumen['Codigo_Proveedor'] = trim($odcData[0]->Codigo_Proveedor);
-            $datosResumen['Telefono_Proveedor'] = trim($odcData[0]->Telefono_Proveedor ?? 'No registrado');
-            $datosResumen['Comprador_Interno'] = trim($odcData[0]->Comprador_Interno ?? 'General');
+            $codCompFinal = trim($odcData[0]->Comprador_Interno ?? '');
+            if ($codCompFinal === '' || $codCompFinal === 'General') {
+                $codCompFinal = '027';
+            }
+            $datosResumen['Comprador_Interno'] = $codCompFinal;
+            $datosResumen['c_CODCOMPRADOR'] = $codCompFinal;
             $datosResumen['Observacion'] = trim($odcData[0]->observacion_odc ?? 'Ninguna');
+
+            // Recopilar todos los correos válidos detectados en los 8 campos de la ficha del ERP
+            $emailsRaw = [
+                $odcData[0]->prov_email_main ?? '',
+                $odcData[0]->prov_email_ven ?? '',
+                $odcData[0]->prov_email_adm ?? '',
+                $odcData[0]->prov_email_vdd ?? '',
+                $odcData[0]->prov_email_fiscal ?? '',
+                $odcData[0]->prov_email_reg ?? '',
+                $odcData[0]->prov_email_depo ?? '',
+                $odcData[0]->prov_email_dep ?? '',
+            ];
+            $emailsDetectados = [];
+            foreach ($emailsRaw as $em) {
+                $em = strtolower(trim((string)$em));
+                if ($em !== '' && filter_var($em, FILTER_VALIDATE_EMAIL) && !in_array($em, $emailsDetectados)) {
+                    $emailsDetectados[] = $em;
+                }
+            }
+            $datosResumen['emails_detectados_erp'] = array_slice($emailsDetectados, 0, 3);
+            if (!empty($emailsDetectados[0])) {
+                $datosResumen['Email_Proveedor'] = $emailsDetectados[0];
+            }
 
             
             $datosResumen['Total_SKUs'] = $cantProductos;
@@ -480,20 +1135,30 @@ class LogisticaController extends Controller
             $proveedorEmail = $odcData[0]->Email_Proveedor ?? null;
             $proveedorTelefono = $odcData[0]->Telefono_Proveedor ?? '';
             $proveedorAsesor = '';
+            $contactosRegistrados = [];
             $contactoId = null;
 
             if ($rif) {
-                $user = DB::table('users')->where('username', $rif)->first();
+                $user = DB::table('users')->where('role', 'proveedor')->where('username', $rif)->first();
                 if ($user) {
-                    $proveedorEmail = $user->email;
+                    if (!empty($user->email) && !str_contains($user->email, '@proveedor.suraki.net')) {
+                        $proveedorEmail = $user->email;
+                    }
                     $proveedorAsesor = $user->name;
                     
+                    $contactosRegistrados = DB::table('proveedor_contactos')
+                        ->where('user_id', $user->id)
+                        ->select('id', 'nombre', 'email', 'telefono')
+                        ->get();
+
                     $contacto = DB::table('proveedor_contactos')
                         ->where('user_id', $user->id)
                         ->orderBy('id', 'desc')
                         ->first();
                     if ($contacto) {
-                        $proveedorEmail = $contacto->email ?: $proveedorEmail;
+                        if (!empty($contacto->email) && !str_contains($contacto->email, '@proveedor.suraki.net')) {
+                            $proveedorEmail = $contacto->email;
+                        }
                         $proveedorTelefono = $contacto->telefono ?: $proveedorTelefono;
                         $proveedorAsesor = $contacto->nombre ?: $proveedorAsesor;
                         $contactoId = $contacto->id;
@@ -501,9 +1166,83 @@ class LogisticaController extends Controller
                 }
             }
 
+            if ((empty($proveedorEmail) || str_contains($proveedorEmail, '@proveedor.suraki.net')) && !empty($datosResumen['Email_Proveedor'])) {
+                $proveedorEmail = $datosResumen['Email_Proveedor'];
+                if (!empty($user) && str_contains($user->email, '@proveedor.suraki.net')) {
+                    DB::table('users')->where('id', $user->id)->update(['email' => $proveedorEmail]);
+                }
+            }
+
+            try {
+                $now = now();
+                DB::table('erp_ordenes_sync')->upsert([[
+                    'numero_oc' => $documentoReal,
+                    'fecha_emision' => $odcData[0]->fecha_odc,
+                    'fecha_recepcion' => $fechaRecepcionMostrar,
+                    'proveedor' => trim($odcData[0]->Nombre_Proveedor),
+                    'destino' => trim($odcData[0]->Muelle_Destino),
+                    'resumen_json' => json_encode($datosResumen),
+                    'detalles_json' => json_encode($detalles),
+                    'categoria_sugerida' => \App\Services\AppointmentDurationService::detectarCategoria((array)$datosResumen),
+                    'peso_estimado_ton' => \App\Services\AppointmentDurationService::estimarPesoToneladas((array)$datosResumen),
+                    'estatus_habilitacion' => 'pendiente',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ]], ['numero_oc'], [
+                    'fecha_emision', 'fecha_recepcion', 'proveedor', 'destino',
+                    'resumen_json', 'detalles_json', 'categoria_sugerida', 'peso_estimado_ton', 'updated_at'
+                ]);
+            } catch (\Exception $ex) {}
+
+            $syncRowLocal = DB::table('erp_ordenes_sync')->where('numero_oc', $documentoReal)->first();
+            $emailLogs = DB::table('email_logs')
+                ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $documentoReal])
+                ->orderBy('created_at', 'desc')
+                ->get(['id', 'email_destino', 'vendedor_nombre', 'tipo_evento', 'estatus', 'error_mensaje', 'created_at']);
+
+            $habilitadaInfo = null;
+            if ($syncRowLocal && $syncRowLocal->habilitada_por_user_id) {
+                $uComp = DB::table('users')->where('id', $syncRowLocal->habilitada_por_user_id)->first();
+                if ($uComp) {
+                    $habilitadaInfo = [
+                        'nombre' => $uComp->name,
+                        'email' => $uComp->email,
+                        'fecha' => $syncRowLocal->updated_at ?? $syncRowLocal->created_at
+                    ];
+                }
+            }
+
+            $emailLogHabilitada = $emailLogs->where('tipo_evento', 'odc_habilitada')->first();
+            $fechaEnvioComprador = $emailLogHabilitada ? $emailLogHabilitada->created_at : null;
+            if (!$fechaEnvioComprador && $syncRowLocal) {
+                $fueHabilitada = in_array($syncRowLocal->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRowLocal->habilitada_por_user_id);
+                if ($fueHabilitada && !empty($syncRowLocal->updated_at) && $syncRowLocal->updated_at != $syncRowLocal->created_at) {
+                    $fechaEnvioComprador = $syncRowLocal->updated_at;
+                } elseif (!empty($syncRowLocal->fecha_emision)) {
+                    $fechaEnvioComprador = $syncRowLocal->fecha_emision;
+                } elseif (!empty($syncRowLocal->created_at)) {
+                    $fechaEnvioComprador = $syncRowLocal->created_at;
+                }
+            }
+            $fechaRegistroCita = $citaActiva ? $citaActiva->created_at : null;
+            $fechaCompletada = ($citaActiva && $citaActiva->estatus === 'finalizada') 
+                ? ($citaActiva->fecha_completada ?? $citaActiva->updated_at) 
+                : null;
+            $completadaPorNombre = ($citaActiva && $citaActiva->estatus === 'finalizada') 
+                ? ($citaActiva->completada_por_nombre ?? 'Recepción') 
+                : null;
+
             return response()->json([
                 'status' => 'Exitoso',
                 'resumen' => (object)$datosResumen,
+                'estatus_habilitacion' => $syncRowLocal ? $syncRowLocal->estatus_habilitacion : 'pendiente',
+                'habilitada_info' => $habilitadaInfo,
+                'fecha_envio_comprador' => $fechaEnvioComprador,
+                'fecha_registro_cita' => $fechaRegistroCita,
+                'fecha_completada' => $fechaCompletada,
+                'completada_por_nombre' => $completadaPorNombre,
+                'email_logs' => $emailLogs,
+                'contactos_registrados' => $contactosRegistrados,
                 'nombre_proveedor' => trim($odcData[0]->Nombre_Proveedor),
                 'factura_proveedor' => ($citaActiva && $citaActiva->numero_factura) ? $citaActiva->numero_factura : 'Por facturar',
                 'tipo_mercancia' => $citaActiva ? $citaActiva->tipo_mercancia : null,
@@ -516,12 +1255,18 @@ class LogisticaController extends Controller
                 'detalles' => $detalles,
                 'sucursal_destino' => trim($odcData[0]->Muelle_Destino),
                 'sucursal_nombre' => match(trim($odcData[0]->Muelle_Destino)) {
-                    '0101' => '01 PISO DE VENTA TU EMPRESA',
-                    '0102' => '02 DEPOSITO GRAL TU EMPRESA',
+                    '0101' => '01 PISO DE VENTA HIPER SURAKI',
+                    '0102' => '02 DEPOSITO GRAL HIPER SURAKI',
                     '0111' => '11 DEP PRODUCCION SURAPAN',
-                    '0115' => '15 DEPOSITO INSUMOS GRAL Empresa Base',
+                    '0115' => '15 DEPOSITO INSUMOS GRAL SURAKI',
+                    '0140' => '40 DEP CARNES Y PERECEDEROS',
+                    '0141' => '41 DEP CARNES Y PERECEDEROS',
+                    '0150' => '50 DEP PERECEDEROS',
+                    '0160' => '60 DEP GENERAL ANDINKA',
                     '0161' => '61 DEPOSITO GENERAL ANDINKA',
+                    '0171' => '71 DEP SUCURSALES',
                     '0180' => '80 GALPON CENTRAL AV ANDRES BELLO',
+                    '01993' => '993 SEDE CC YUAN LIN',
                     default => 'Sucursal ' . $odcData[0]->Muelle_Destino
                 },
                 'tiempos' => [
@@ -531,14 +1276,20 @@ class LogisticaController extends Controller
                     'carga_disponibles' => $cargaDisponibles,
                     'operarios_usados' => $numEquipos,
                 ],
-                'proveedor_email' => $proveedorEmail,
+                'proveedor_email' => $proveedorEmail ?: ($datosResumen['Email_Proveedor'] ?? null),
                 'proveedor_telefono' => $proveedorTelefono,
                 'proveedor_asesor' => $proveedorAsesor,
                 'contacto_id' => $contactoId,
+                'contactos_registrados' => $contactosRegistrados ?? [],
+                'emails_detectados_erp' => $datosResumen['emails_detectados_erp'] ?? [],
             ]);
 
-        } catch (\Exception $e) {
-            return response()->json(['error' => 'Error al conectar con ERP: ' . $e->getMessage()], 500);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Error al conectar con ERP al buscar orden {$orden}: " . $e->getMessage(), [
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            return $this->buscarOrdenSync($orden);
         }
     }
 
@@ -547,7 +1298,7 @@ class LogisticaController extends Controller
      */
     public function recalcularTiempo(Request $request, $orden, $forceDb = false)
     {
-        if (!$forceDb && env('ERP_CONNECTION_MODE') === 'api') {
+        if (!$forceDb && $this->esModoApi()) {
             try {
                 $ordenLimpia = preg_replace('/^E/i', '', $orden);
                 $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
@@ -597,7 +1348,7 @@ class LogisticaController extends Controller
             $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
 
             // Determinar el documento real
-            $odcData = DB::connection('sqlsrv')->select("SELECT c_DOCUMENTO FROM MA_ODC WHERE c_DOCUMENTO IN (?, ?, ?)", [$orden, $ordenLimpia, $ordenPad]);
+            $odcData = DB::connection('sqlsrv')->select("SELECT c_DOCUMENTO FROM MA_ODC WITH (NOLOCK) WHERE c_DOCUMENTO IN (?, ?, ?)", [$orden, $ordenLimpia, $ordenPad]);
             if(count($odcData) === 0) {
                 return response()->json(['error' => 'Orden no encontrada'], 404);
             }
@@ -705,5 +1456,119 @@ class LogisticaController extends Controller
         } catch (\Exception $e) {
             return response()->json(['error' => 'Error al conectar con ERP: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Obtener productos verificados para una ODC.
+     */
+    public function obtenerVerificacionesProducto($orden)
+    {
+        $ordenLimpia = preg_replace('/^E/i', '', $orden);
+        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+        $ordenConE = 'E' . $ordenPad;
+
+        $verificados = DB::table('odc_product_verifications')
+            ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+            ->where('revisado', true)
+            ->pluck('codigo_producto')
+            ->toArray();
+
+        return response()->json([
+            'status' => 'Exitoso',
+            'verificados' => $verificados
+        ]);
+    }
+
+    /**
+     * Marcar / desmarcar un producto como verificado en una ODC.
+     */
+    public function verificarProducto(Request $request, $orden)
+    {
+        $validated = $request->validate([
+            'codigo_producto' => 'required|string',
+            'revisado' => 'required|boolean',
+        ]);
+
+        $ordenLimpia = preg_replace('/^E/i', '', $orden);
+        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+        $ordenConE = 'E' . $ordenPad;
+
+        $numOc = $orden;
+
+        if ($validated['revisado']) {
+            DB::table('odc_product_verifications')->updateOrInsert(
+                ['numero_oc' => $numOc, 'codigo_producto' => $validated['codigo_producto']],
+                [
+                    'revisado' => true,
+                    'user_id' => auth()->id(),
+                    'user_name' => auth()->user() ? auth()->user()->name : 'Usuario',
+                    'updated_at' => now(),
+                    'created_at' => now(),
+                ]
+            );
+        } else {
+            DB::table('odc_product_verifications')
+                ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+                ->where('codigo_producto', $validated['codigo_producto'])
+                ->delete();
+        }
+
+        $verificados = DB::table('odc_product_verifications')
+            ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+            ->where('revisado', true)
+            ->pluck('codigo_producto')
+            ->toArray();
+
+        return response()->json([
+            'status' => 'Exitoso',
+            'verificados' => $verificados
+        ]);
+    }
+
+    /**
+     * Marcar / desmarcar TODOS los productos de una ODC en lote.
+     */
+    public function verificarTodosProductos(Request $request, $orden)
+    {
+        $validated = $request->validate([
+            'codigos' => 'required|array',
+            'revisado' => 'required|boolean',
+        ]);
+
+        $ordenLimpia = preg_replace('/^E/i', '', $orden);
+        $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+        $ordenConE = 'E' . $ordenPad;
+        $numOc = $orden;
+
+        if ($validated['revisado']) {
+            foreach ($validated['codigos'] as $codigo) {
+                DB::table('odc_product_verifications')->updateOrInsert(
+                    ['numero_oc' => $numOc, 'codigo_producto' => (string)$codigo],
+                    [
+                        'revisado' => true,
+                        'user_id' => auth()->id(),
+                        'user_name' => auth()->user() ? auth()->user()->name : 'Usuario',
+                        'updated_at' => now(),
+                        'created_at' => now(),
+                    ]
+                );
+            }
+        } else {
+            DB::table('odc_product_verifications')
+                ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+                ->whereIn('codigo_producto', $validated['codigos'])
+                ->delete();
+        }
+
+        $verificados = DB::table('odc_product_verifications')
+            ->whereIn('numero_oc', [$orden, $ordenLimpia, $ordenPad, $ordenConE])
+            ->where('revisado', true)
+            ->pluck('codigo_producto')
+            ->toArray();
+
+        return response()->json([
+            'status' => 'Exitoso',
+            'verificados' => $verificados
+        ]);
     }
 }

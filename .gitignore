@@ -33,3 +33,10 @@ public/limpiar_bd.php
 public/evaluator.php
 public/crear_enlace.php
 public/reparar_storage.php
+scratch/
+scratch_*.php
+*.lock
+*.mp4
+Imagen_*.jpeg
+prod_corp_emails.json
+ODC_Pruebas.txt

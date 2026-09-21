@@ -24,13 +24,13 @@ class MaintenanceController extends Controller
 
         // Activar el modo de mantenimiento con el bypass secreto
         Artisan::call('down', [
-            '--secret' => 'Empresa Base-admin'
+            '--secret' => 'suraki-admin'
         ]);
 
         // Retornar mensaje de éxito (esto será respondido antes de que el modo mantenimiento bloquee al propio admin si no ha usado el secreto aún)
         return response()->json([
             'message' => 'Modo de mantenimiento activado exitosamente.',
-            'secret_url' => url('/Empresa Base-admin')
+            'secret_url' => url('/suraki-admin')
         ]);
     }
 

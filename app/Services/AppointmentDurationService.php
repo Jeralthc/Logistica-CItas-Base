@@ -28,6 +28,13 @@ class AppointmentDurationService
         $vDescarga = 0.06;
         $categoriaId = null;
 
+        // Si el peso ingresado es mayor a 35 toneladas (el límite máximo legal de carga útil para cualquier vehículo en Venezuela es ~30 Ton),
+        // el usuario con total seguridad escribió Kilogramos en lugar de Toneladas (ej: 50 kg en vez de 0.050 Ton).
+        if ($pesoToneladas > 35) {
+            Log::warning("AppointmentDurationService: Peso sospechosamente alto ({$pesoToneladas} Ton). Auto-convirtiendo de Kilogramos a Toneladas: " . ($pesoToneladas / 1000) . " Ton.");
+            $pesoToneladas = $pesoToneladas / 1000;
+        }
+
         // Si es paletizada, intentamos buscar "Carga Paletizada General", si no, usamos la categoría seleccionada
         if (strtolower($formatoCarga) === 'paletizada') {
             $cat = CategoriaRendimiento::where('nombre', 'Carga Paletizada General')->first();
@@ -58,7 +65,8 @@ class AppointmentDurationService
         $tiempoDescarga = $vDescarga > 0 ? ($pesoToneladas / $vDescarga) : 0;
         $total = (int) ceil($tFijo + $tiempoDescarga + $tiempoAdicional);
 
-        return max(30, $total); // Nunca menos de 30 minutos
+        // Regla operativa: Una cita individual nunca debe durar menos de 30 minutos ni exceder 240 minutos (4 horas máximas)
+        return min(240, max(30, $total));
     }
 
     /**

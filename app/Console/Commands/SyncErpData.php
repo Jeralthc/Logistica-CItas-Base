@@ -28,14 +28,26 @@ class SyncErpData extends Command
      */
     public function handle()
     {
+        $lockFile = storage_path('framework/erp_sync.lock');
+        $fp = @fopen($lockFile, 'c+');
+        if (!$fp || !flock($fp, LOCK_EX | LOCK_NB)) {
+            $this->warn('Ya existe una sincronización ERP en ejecución. Omitiendo esta ejecución para evitar sobrecarga.');
+            return 0;
+        }
+
         $apiUrl = env('ERP_API_URL');
         $apiToken = env('ERP_API_TOKEN');
 
         if (!$apiUrl) {
-            $this->error('Error: ERP_API_URL no está configurada. Debes especificar la URL de tu sitio web (Ej: https://citsur.Empresa Base.net/api).');
+            $this->error('Error: ERP_API_URL no está configurada. Debes especificar la URL de tu sitio web (Ej: https://citsur.suraki.net/api).');
+            if ($fp) {
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            }
             return 1;
         }
 
+        $inicioSync = microtime(true);
         $this->info("Iniciando sincronización ERP con la web: {$apiUrl}");
 
         try {
@@ -51,14 +63,14 @@ class SyncErpData extends Command
             }
 
             $ordenes = $dataPendientes['ordenes'];
-            $this->info("Se encontraron " . count($ordenes) . " órdenes pendientes. Obteniendo detalles...");
+            $totalOrdenes = count($ordenes);
+            $this->info("Se encontraron {$totalOrdenes} órdenes pendientes. Obteniendo detalles...");
 
             $payloadOrdenes = [];
 
             // 2. Extraer detalles para cada orden
             foreach ($ordenes as $index => $orden) {
                 $numeroOc = $orden['numero_oc'];
-                $this->line("Procesando [" . ($index + 1) . "/" . count($ordenes) . "] OC: {$numeroOc}");
                 
                 $responseDetalles = $logistica->buscarOrdenCompleta($numeroOc, true);
                 $dataDetalles = json_decode($responseDetalles->getContent(), true);
@@ -110,13 +122,19 @@ class SyncErpData extends Command
                 }
             }
             
-            $this->info("¡Sincronización Total Exitosa!");
-            Log::info("ERP Sync: Sincronización exitosa con la web en {$totalChunks} lotes.");
+            $duracionSeg = round(microtime(true) - $inicioSync, 2);
+            $this->info("¡Sincronización Total Exitosa en {$duracionSeg}s!");
+            Log::info("ERP Sync: Sincronización exitosa con la web en {$totalChunks} lotes ({$duracionSeg}s).");
 
         } catch (\Exception $e) {
             $this->error("Excepción durante la sincronización: " . $e->getMessage());
             Log::error("ERP Sync Exception: " . $e->getMessage());
             return 1;
+        } finally {
+            if ($fp) {
+                flock($fp, LOCK_UN);
+                fclose($fp);
+            }
         }
 
         return 0;

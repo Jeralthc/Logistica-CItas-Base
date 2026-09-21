@@ -5,6 +5,7 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 
 const props = defineProps({
     rif: String,
@@ -20,6 +21,8 @@ const form = useForm({
     password_confirmation: '',
 });
 
+const showPasswordRules = ref(false);
+
 const submit = () => {
     form.post(route('proveedor.setup'), {
         onFinish: () => form.reset('password', 'password_confirmation'),
@@ -30,12 +33,12 @@ const submit = () => {
 <template>
     <Head title="Activación de Cuenta - Portal Logístico" />
 
-    <div class="bg-indigo-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
+    <div class="bg-red-600 text-white text-sm md:text-base py-3 px-8 flex flex-col md:flex-row justify-between items-center z-20 relative font-medium fixed top-0 w-full shadow-md gap-2 md:gap-0">
         <div class="flex-1 text-left">
             <span>📞 0424-7170326</span>
         </div>
         <div class="flex-1 text-center">
-            <span>✉️ contacto@tuempresa.com</span>
+            <span>✉️ hipersurakica@gmail.com</span>
         </div>
         <div class="flex-1 text-right">
             <span>🕒 Horario: 8:00 a.m. a 6:00 p.m.</span>
@@ -51,10 +54,10 @@ const submit = () => {
             <!-- Header del Formulario -->
             <div class="text-center mb-8 flex flex-col items-center">
                 <div class="p-4 bg-white rounded-3xl shadow-lg flex items-center justify-center gap-3 border border-slate-100">
-                    <img src="/images/logo.png" alt="Logo Empresa Base" class="w-12 h-12 object-contain" />
+                    <img src="/images/logo_suraki.ico" alt="Logo Suraki" class="w-12 h-12 object-contain" />
                     <div class="text-left pr-4">
-                       <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">Empresa Base</h2>
-                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-indigo-600">Logística</p>
+                       <h2 class="text-3xl font-black tracking-tighter text-slate-800 uppercase">SURAKI</h2>
+                       <p class="text-[9px] uppercase font-black tracking-[0.3em] text-red-600">Logística</p>
                     </div>
                 </div>
                 <h2 class="text-3xl font-bold text-white mt-6 tracking-tight drop-shadow-md">
@@ -78,17 +81,42 @@ const submit = () => {
                 <input type="hidden" v-model="form.name" />
                 <input type="hidden" v-model="form.username" />
 
-                <div class="mt-5">
+                <div class="mt-5 relative">
                     <InputLabel for="password" value="Contraseña" class="font-semibold text-slate-800" />
                     <TextInput
                         id="password"
                         type="password"
-                        class="mt-1 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/30 rounded-lg shadow-sm"
+                        class="mt-1 block w-full border-slate-200 focus:border-red-600 focus:ring-red-600/30 rounded-lg shadow-sm"
                         v-model="form.password"
                         required
+                        pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[\W_]).{8,}"
                         autocomplete="new-password"
-                        placeholder="Mínimo 8 caracteres"
+                        placeholder="Mínimo 8 caracteres, números y símbolos"
+                        @focus="showPasswordRules = true"
+                        @blur="showPasswordRules = false"
                     />
+                    <!-- Tooltip interactivo de reglas -->
+                    <div v-show="showPasswordRules" class="absolute z-20 w-64 p-4 mt-2 text-sm text-slate-700 bg-white border border-slate-200 rounded-xl shadow-2xl right-0 top-full transition-opacity duration-300">
+                        <div class="absolute -top-2 right-6 w-4 h-4 bg-white border-t border-l border-slate-200 transform rotate-45"></div>
+                        <p class="font-bold mb-3 text-slate-800 border-b pb-2">Tu contraseña debe tener:</p>
+                        <ul class="space-y-2">
+                            <li class="flex items-center gap-2" :class="form.password.length >= 8 ? 'text-green-600' : 'text-slate-500'">
+                                <span v-if="form.password.length >= 8">✅</span><span v-else>❌</span> Al menos 8 caracteres
+                            </li>
+                            <li class="flex items-center gap-2" :class="/[A-Z]/.test(form.password) ? 'text-green-600' : 'text-slate-500'">
+                                <span v-if="/[A-Z]/.test(form.password)">✅</span><span v-else>❌</span> Al menos una mayúscula
+                            </li>
+                            <li class="flex items-center gap-2" :class="/[a-z]/.test(form.password) ? 'text-green-600' : 'text-slate-500'">
+                                <span v-if="/[a-z]/.test(form.password)">✅</span><span v-else>❌</span> Al menos una minúscula
+                            </li>
+                            <li class="flex items-center gap-2" :class="/\d/.test(form.password) ? 'text-green-600' : 'text-slate-500'">
+                                <span v-if="/\d/.test(form.password)">✅</span><span v-else>❌</span> Al menos un número
+                            </li>
+                            <li class="flex items-center gap-2" :class="/[\W_]/.test(form.password) ? 'text-green-600' : 'text-slate-500'">
+                                <span v-if="/[\W_]/.test(form.password)">✅</span><span v-else>❌</span> Al menos un símbolo
+                            </li>
+                        </ul>
+                    </div>
                     <InputError class="mt-2" :message="form.errors.password" />
                 </div>
 
@@ -97,7 +125,7 @@ const submit = () => {
                     <TextInput
                         id="password_confirmation"
                         type="password"
-                        class="mt-1 block w-full border-slate-200 focus:border-indigo-600 focus:ring-indigo-600/30 rounded-lg shadow-sm"
+                        class="mt-1 block w-full border-slate-200 focus:border-red-600 focus:ring-red-600/30 rounded-lg shadow-sm"
                         v-model="form.password_confirmation"
                         required
                         autocomplete="new-password"
@@ -108,7 +136,7 @@ const submit = () => {
 
                 <div class="mt-8 flex flex-col gap-5 items-center">
                     <PrimaryButton 
-                        class="w-full justify-center text-lg py-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 rounded-2xl shadow-lg shadow-indigo-600/30 transition-all duration-300 hover:shadow-indigo-600/50 hover:-translate-y-0.5"
+                        class="w-full justify-center text-lg py-4 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-2xl shadow-lg shadow-red-600/30 transition-all duration-300 hover:shadow-red-600/50 hover:-translate-y-0.5"
                         :class="{ 'opacity-25': form.processing }"
                         :disabled="form.processing"
                     >
@@ -117,9 +145,9 @@ const submit = () => {
 
                     <Link
                         :href="route('login')"
-                        class="text-sm text-slate-600 hover:text-indigo-600 font-medium transition-colors"
+                        class="text-sm text-slate-600 hover:text-red-600 font-medium transition-colors"
                     >
-                        ¿Ya tienes una cuenta? <span class="text-indigo-600 font-bold underline decoration-2 underline-offset-2">Inicia Sesión</span>
+                        ¿Ya tienes una cuenta? <span class="text-red-600 font-bold underline decoration-2 underline-offset-2">Inicia Sesión</span>
                     </Link>
                 </div>
             </form>
@@ -127,12 +155,12 @@ const submit = () => {
         </div>
 
         <!-- Corporate Footer -->
-        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-indigo-600 z-10">
+        <footer class="w-full bg-slate-900 text-slate-400 py-10 mt-auto border-t-[4px] border-red-600 z-10">
             <div class="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div>
                     <h3 class="text-white font-bold text-lg mb-4 flex items-center gap-2">
-                        <img src="/images/logo.png" alt="Logo" class="w-6 h-6 grayscale brightness-200" />
-                        Empresa Base LOGÍSTICA
+                        <img src="/images/logo_suraki.ico" alt="Logo" class="w-6 h-6 grayscale brightness-200" />
+                        SURAKI LOGÍSTICA
                     </h3>
                     <p class="text-sm leading-relaxed max-w-sm">
                         Sistema integral para la gestión de citas, recepción de mercancía y optimización de tiempos en andén.
@@ -142,14 +170,14 @@ const submit = () => {
                     <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Soporte Técnico</h4>
                     <ul class="space-y-2 text-sm">
                         <li>📞 0424-7475109</li>
-                        <li>✉️ soporte@tuempresa.com</li>
+                        <li>✉️ sistemassuraki@gmail.com</li>
                         <li>🕒 Lunes a Lunes: 7:00 am - 10:00 pm</li>
                     </ul>
                 </div>
             </div>
             <div class="max-w-6xl mx-auto px-6 mt-10 pt-6 border-t border-slate-800 text-xs text-center text-slate-500">
-                &copy; {{ new Date().getFullYear() }} Portal Logístico Empresa Base. Todos los derechos reservados. <br>
-                Desarrollado por el Departamento de Sistemas.
+                &copy; {{ new Date().getFullYear() }} Portal Logístico Suraki. Todos los derechos reservados. <br>
+                Desarrollado por el Departamento de Sistemas de Suraki.
             </div>
         </footer>
     </div>

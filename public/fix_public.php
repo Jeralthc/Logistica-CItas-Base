@@ -1,7 +1,7 @@
 <?php
 // Crea un enlace simbólico: public -> public_html
 // Para que Laravel encuentre sus archivos build en la ruta correcta
-// Sube a public_html/ y abre: https://citsur.Empresa Base.net/fix_public.php
+// Sube a public_html/ y abre: https://citsur.suraki.net/fix_public.php
 
 $root = realpath(__DIR__ . '/..');
 $publicLink = $root . '/public';

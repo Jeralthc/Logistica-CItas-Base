@@ -8,7 +8,7 @@ ini_set('display_errors', 1);
 $baseDir = realpath(__DIR__ . '/..');
 
 // 1. Obtener la clave secreta desde .env
-$secretToken = 'Empresa BaseSecreto2026'; // Fallback
+$secretToken = 'SurakiSecreto2026'; // Fallback
 $envPath = $baseDir . '/.env';
 if (file_exists($envPath)) {
     $envContent = file_get_contents($envPath);
@@ -45,7 +45,7 @@ if (!$authenticated) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Recuperación de Emergencia - Empresa Base</title>
+        <title>Recuperación de Emergencia - Suraki</title>
         <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             body {
@@ -140,7 +140,7 @@ if (!$authenticated) {
             <?php if (isset($error)): ?>
                 <div class="error"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
-            <div class="footer">Sistema de Despliegue Seguro - Empresa Base © 2026</div>
+            <div class="footer">Sistema de Despliegue Seguro - Suraki © 2026</div>
         </div>
     </body>
     </html>
@@ -161,11 +161,11 @@ if (isset($_GET['op']) && $_GET['op'] === 'maint_on') {
     $time = time();
     $data = [
         'time' => $time,
-        'secret' => 'Empresa Base-admin',
+        'secret' => 'suraki-admin',
         'status' => 503
     ];
     if (file_put_contents($downFile, json_encode($data))) {
-        $message = "Mantenimiento ACTIVADO. Bypass secreto: /Empresa Base-admin";
+        $message = "Mantenimiento ACTIVADO. Bypass secreto: /suraki-admin";
     } else {
         $message = "Error al escribir el archivo de mantenimiento.";
         $messageType = 'error';
@@ -437,7 +437,7 @@ usort($backups, function ($a, $b) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Consola de Emergencia - Logística Empresa Base</title>
+    <title>Consola de Emergencia - Logística Suraki</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;900&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
     <style>
         body {
