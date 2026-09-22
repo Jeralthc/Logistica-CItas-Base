@@ -211,6 +211,23 @@ if (isset($_GET['op']) && $_GET['op'] === 'clear_cache') {
     $message = "Cachés eliminadas con éxito. Se borraron {$deletedFiles} archivos de caché.";
 }
 
+// Acción: Ejecutar Migraciones (Artisan migrate --force)
+if (isset($_GET['op']) && $_GET['op'] === 'migrate') {
+    try {
+        require_once $baseDir . '/vendor/autoload.php';
+        $app = require_once $baseDir . '/bootstrap/app.php';
+        $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+        $kernel->bootstrap();
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+        $terminalOutput .= \Illuminate\Support\Facades\Artisan::output();
+        $message = "Migraciones ejecutadas exitosamente.";
+    } catch (\Throwable $e) {
+        $message = "Error ejecutando migraciones: " . $e->getMessage();
+        $messageType = 'error';
+        $terminalOutput .= $e->getMessage() . "\n" . $e->getTraceAsString();
+    }
+}
+
 // Acción: Restaurar Backup
 if (isset($_POST['op']) && $_POST['op'] === 'restore_backup') {
     $filename = basename($_POST['filename'] ?? '');
@@ -681,6 +698,7 @@ usort($backups, function ($a, $b) {
                         <a href="safe_deploy.php?op=maint_on" class="btn btn-primary">Encender Mantenimiento (Down)</a>
                     <?php endif; ?>
                     <a href="safe_deploy.php?op=clear_cache" class="btn btn-secondary">Limpiar Caché (Borrado Físico)</a>
+                    <a href="safe_deploy.php?op=migrate" class="btn btn-secondary" onclick="return confirm('¿Ejecutar migraciones en la base de datos de producción?')">Ejecutar Migraciones (Artisan)</a>
                 </div>
 
                 <h3 class="card-title" style="margin-top: 24px; margin-bottom: 12px;">Cargar Parche ZIP Directo</h3>
