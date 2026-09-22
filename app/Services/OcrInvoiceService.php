@@ -63,7 +63,7 @@ class OcrInvoiceService
                 'total_odc' => $datosOdc['total_monto'] ?? 0,
                 'diferencia_total' => $conciliacion['diferencia_total'] ?? 0,
                 'estatus_conciliacion' => $conciliacion['estatus_general'],
-                'resumen_discrepancias' => $conciliacion['resumen_texto'],
+                'resumen_discrepancias' => mb_substr($conciliacion['resumen_texto'] ?? '', 0, 250),
                 'datos_factura_json' => json_encode($datosFactura['articulos'] ?? []),
                 'conciliacion_json' => json_encode($conciliacion['renglones'] ?? []),
                 'raw_text' => $datosFactura['raw_text'] ?? null,
