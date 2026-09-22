@@ -219,6 +219,7 @@ PROMPT;
 
     /**
      * Motor de conciliación renglón por renglón entre ODC y Factura
+     * Usa matching multi-estrategia para emparejar productos de distintos sistemas
      */
     protected function conciliarOdcConFactura(array $datosOdc, array $datosFactura)
     {
@@ -232,39 +233,66 @@ PROMPT;
 
         // 1. Recorrer cada ítem de la ODC y buscar su match en la factura
         foreach ($itemsOdc as $idxOdc => $itemOdc) {
-            $codOdc = strtoupper(trim($itemOdc['codigo']));
-            $descOdc = mb_strtoupper(trim($itemOdc['descripcion']));
-            $cantOdc = floatval($itemOdc['cantidad']);
+            $codOdc = strtoupper(trim($itemOdc['codigo'] ?? ''));
+            $descOdc = mb_strtoupper(trim($itemOdc['descripcion'] ?? ''));
+            $cantOdc = floatval($itemOdc['cantidad'] ?? 0);
 
             $matchFactura = null;
             $matchIndex = null;
-            $mejorSimilitud = 0;
+            $mejorScore = 0;
 
-            // Buscar por código exacto primero
-            if (!empty($codOdc)) {
-                foreach ($itemsFactura as $idxF => $itemF) {
-                    if (in_array($idxF, $itemsFacturaUsados)) continue;
-                    $codF = strtoupper(trim($itemF['codigo'] ?? ''));
-                    if (!empty($codF) && $codF === $codOdc) {
-                        $matchFactura = $itemF;
-                        $matchIndex = $idxF;
-                        break;
+            foreach ($itemsFactura as $idxF => $itemF) {
+                if (in_array($idxF, $itemsFacturaUsados)) continue;
+                
+                $codF = strtoupper(trim($itemF['codigo'] ?? ''));
+                $descF = mb_strtoupper(trim($itemF['descripcion'] ?? ''));
+                $score = 0;
+
+                // Estrategia 1: Código exacto (100 puntos)
+                if (!empty($codOdc) && !empty($codF) && $codF === $codOdc) {
+                    $score = 100;
+                }
+
+                // Estrategia 2: Código contenido en el otro (70 puntos)
+                if ($score < 70 && !empty($codOdc) && !empty($codF)) {
+                    if (str_contains($codF, $codOdc) || str_contains($codOdc, $codF)) {
+                        $score = max($score, 70);
                     }
                 }
-            }
 
-            // Si no hubo match por código, buscar por similitud de descripción
-            if (!$matchFactura) {
-                foreach ($itemsFactura as $idxF => $itemF) {
-                    if (in_array($idxF, $itemsFacturaUsados)) continue;
-                    $descF = mb_strtoupper(trim($itemF['descripcion'] ?? ''));
-                    
-                    similar_text($descOdc, $descF, $porcentaje);
-                    if ($porcentaje > 60 && $porcentaje > $mejorSimilitud) {
-                        $mejorSimilitud = $porcentaje;
-                        $matchFactura = $itemF;
-                        $matchIndex = $idxF;
+                // Estrategia 3: similar_text en descripción
+                if ($score < 60 && !empty($descOdc) && !empty($descF)) {
+                    similar_text($descOdc, $descF, $pct);
+                    if ($pct >= 45) {
+                        $score = max($score, $pct);
                     }
+                }
+
+                // Estrategia 4: Coincidencia de palabras clave significativas
+                if ($score < 50 && !empty($descOdc) && !empty($descF)) {
+                    $kwScore = $this->calcularScorePalabras($descOdc, $descF);
+                    if ($kwScore >= 35) {
+                        $score = max($score, $kwScore);
+                    }
+                }
+
+                // Estrategia 5: Match por dimensión (120ML, 500GR, etc.)
+                if ($score < 40 && !empty($descOdc) && !empty($descF)) {
+                    $dimOdc = $this->extraerDimensiones($descOdc);
+                    $dimF = $this->extraerDimensiones($descF);
+                    if (!empty($dimOdc) && !empty($dimF)) {
+                        $dimComunes = array_intersect($dimOdc, $dimF);
+                        if (count($dimComunes) > 0) {
+                            $score = max($score, 35 + (count($dimComunes) * 10));
+                        }
+                    }
+                }
+
+                if ($score > $mejorScore && $score >= 35) {
+                    $mejorScore = $score;
+                    $matchFactura = $itemF;
+                    $matchIndex = $idxF;
+                    if ($score >= 100) break;
                 }
             }
 
@@ -274,13 +302,13 @@ PROMPT;
                 $diff = round($cantFactura - $cantOdc, 2);
 
                 if ($diff == 0) {
-                    $estado = 'coincide'; // 🟢 Conforme
+                    $estado = 'coincide';
                 } elseif ($diff < 0) {
-                    $estado = 'faltante'; // 🟡 Entrega parcial
+                    $estado = 'faltante';
                     $hayDiscrepancias = true;
                     $motivosDiscrepancia[] = "Faltan " . abs($diff) . " und de '{$itemOdc['descripcion']}'";
                 } else {
-                    $estado = 'excedente'; // 🔴 Sobre-entrega
+                    $estado = 'excedente';
                     $hayDiscrepancias = true;
                     $motivosDiscrepancia[] = "Excedente de +{$diff} und en '{$itemOdc['descripcion']}'";
                 }
@@ -296,7 +324,6 @@ PROMPT;
                     'estado' => $estado,
                 ];
             } else {
-                // Producto en ODC que no vino facturado
                 $hayDiscrepancias = true;
                 $motivosDiscrepancia[] = "No vino facturado: '{$itemOdc['descripcion']}' ({$cantOdc} und)";
                 $renglonesComparados[] = [
@@ -312,7 +339,7 @@ PROMPT;
             }
         }
 
-        // 2. Verificar ítems en la factura que no estaban en la ODC (no solicitados)
+        // 2. Ítems en factura que no matchearon con nada de la ODC
         foreach ($itemsFactura as $idxF => $itemF) {
             if (!in_array($idxF, $itemsFacturaUsados)) {
                 $hayDiscrepancias = true;
@@ -328,7 +355,7 @@ PROMPT;
                     'descripcion_factura' => $descF,
                     'cantidad_factura' => $cantF,
                     'diferencia' => $cantF,
-                    'estado' => 'no_solicitado', // 🔴 No pedido
+                    'estado' => 'no_solicitado',
                 ];
             }
         }
@@ -357,5 +384,54 @@ PROMPT;
             'renglones' => $renglonesComparados,
             'discrepancias_lista' => $motivosDiscrepancia,
         ];
+    }
+
+    /**
+     * Calcula score de coincidencia basado en palabras clave compartidas
+     */
+    protected function calcularScorePalabras(string $desc1, string $desc2): float
+    {
+        $stopWords = ['DE', 'LA', 'EL', 'EN', 'CON', 'SIN', 'POR', 'PARA', 'UND', 'USO', 'INTERNO', 'C/', 'Y', 'A', 'X'];
+        
+        $words1 = array_diff(preg_split('/[\s\/\-\(\)\.,]+/', $desc1), $stopWords, ['']);
+        $words2 = array_diff(preg_split('/[\s\/\-\(\)\.,]+/', $desc2), $stopWords, ['']);
+        
+        if (empty($words1) || empty($words2)) return 0;
+
+        $coincidencias = 0;
+        foreach ($words1 as $w1) {
+            if (mb_strlen($w1) < 3) continue;
+            foreach ($words2 as $w2) {
+                if (mb_strlen($w2) < 3) continue;
+                if ($w1 === $w2 || (mb_strlen($w1) >= 4 && str_contains($w2, $w1)) || (mb_strlen($w2) >= 4 && str_contains($w1, $w2))) {
+                    $coincidencias++;
+                    break;
+                }
+            }
+        }
+
+        $totalPalabras = max(count($words1), count($words2));
+        return ($coincidencias / $totalPalabras) * 100;
+    }
+
+    /**
+     * Extrae dimensiones normalizadas (volumen, peso) de una descripción
+     */
+    protected function extraerDimensiones(string $desc): array
+    {
+        $dims = [];
+        $desc = preg_replace('/(\d+)\s*(ML|CC|GR|KG|LT|L|OZ|UND|MT)\b/i', '$1$2', $desc);
+        
+        if (preg_match_all('/(\d+(?:\.\d+)?)\s*(ML|CC|GR|KG|LT|L|OZ|MT)\b/i', $desc, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $val = floatval($m[1]);
+                $unit = strtoupper($m[2]);
+                if ($unit === 'CC') $unit = 'ML';
+                if ($unit === 'LT') $unit = 'L';
+                if ($unit === 'L' && $val < 100) { $val *= 1000; $unit = 'ML'; }
+                $dims[] = $val . $unit;
+            }
+        }
+        return $dims;
     }
 }
