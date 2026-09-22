@@ -1,4 +1,7 @@
 *.log
+Audio_Importante.ogg
+*.ogg
+
 .DS_Store
 .env
 .env.backup

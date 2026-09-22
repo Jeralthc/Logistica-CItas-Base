@@ -132,6 +132,10 @@ Route::middleware('web')->group(function () {
             Route::get('/citas/detalle/{numero_oc}', [CitaController::class, 'detallePorOdc']);
             Route::post('/citas/{id}/finalizar', [CitaController::class, 'finalizar']);
 
+            // OCR y Conciliación de Factura
+            Route::post('/citas/{id}/analizar-factura', [\App\Http\Controllers\OcrInvoiceController::class, 'analizar']);
+            Route::get('/citas/{id}/conciliacion-factura', [\App\Http\Controllers\OcrInvoiceController::class, 'obtener']);
+
             // Monitor ODC (interno, sin token de API)
             Route::get('/monitor-odc/ordenes', [ErpApiController::class, 'getOrdenesPendientes']);
 

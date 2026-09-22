@@ -133,8 +133,9 @@ class CitaController extends Controller
                     }
                 }
 
-                // Ver qué muelles están libres en ese slot
-                $muellesOcupados = [];
+                // Ver si hay CUALQUIER cita que solape en ese slot (independientemente del muelle o producto)
+                // Regla de negocio: La recepción es compartida por el equipo de almacén (Unai y Juan). Si una hora ya está ocupada/apartada, no se puede agendar nadie más.
+                $citaSolapada = null;
                 foreach ($citasExistentes as $cita) {
                     $citaInicio = Carbon::parse($cita->fecha_cita);
                     $duracionReal = $cita->duracion_minutos ?? $duracionMinutos;
@@ -142,18 +143,12 @@ class CitaController extends Controller
 
                     // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
                     if ($slotInicio->lt($citaFin) && $slotFin->gt($citaInicio)) {
-                        $muellesOcupados[] = $cita->muelle_asignado;
-                        // Si la cita ocupa un muelle que comparte recepción física (ej: 0102 y 0101 en Hiper Suraki),
-                        // también ocupa todos los muelles equivalentes de esa misma sede física.
-                        $equiv = self::getMuellesEquivalentes($cita->muelle_asignado);
-                        foreach ($equiv as $eq) {
-                            $muellesOcupados[] = $eq;
-                        }
+                        $citaSolapada = $cita;
+                        break;
                     }
                 }
 
-                $muellesLibres = array_values(array_diff($muelles, $muellesOcupados));
-                $disponible = !$bloqueadoPorHorario && count($muellesLibres) > 0;
+                $disponible = !$bloqueadoPorHorario && ($citaSolapada === null);
 
                 $slots[] = [
                     'hora' => $horaStr,
@@ -161,9 +156,9 @@ class CitaController extends Controller
                     'hora_fin' => $slotFin->format('h:i A'),
                     'disponible' => $disponible,
                     'bloqueado_horario' => $bloqueadoPorHorario,
-                    'motivo_bloqueo' => $motivoBloqueo,
-                    'muelles_libres' => count($muellesLibres),
-                    'muelles' => $muellesLibres,
+                    'motivo_bloqueo' => $motivoBloqueo ?? ($citaSolapada ? 'Horario ya apartado por otra recepción' : null),
+                    'muelles_libres' => $disponible ? 1 : 0,
+                    'muelles' => $disponible ? $muelles : [],
                 ];
             }
         }
@@ -278,10 +273,8 @@ class CitaController extends Controller
             }
         }
 
-        // Verificar que el muelle esté libre (Rango) considerando muelles equivalentes de la misma sede física
-        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
+        // Verificar que NO exista ninguna cita agendada en ese horario (capacidad global)
         $citasExistentes = DB::table('appointments')
-            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -292,7 +285,7 @@ class CitaController extends Controller
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})"], 422);
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
             }
         }
 
@@ -474,11 +467,9 @@ class CitaController extends Controller
             }
         }
 
-        // Verificar que el muelle esté libre (Rango), excluyendo la cita actual y considerando muelles equivalentes
-        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
+        // Verificar que el horario esté libre globalmente, excluyendo la cita actual
         $citasExistentes = DB::table('appointments')
             ->where('id', '!=', $id)
-            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -489,7 +480,7 @@ class CitaController extends Controller
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})"], 422);
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
             }
         }
 
@@ -753,11 +744,34 @@ class CitaController extends Controller
                 $cita->completada_por_nombre = null;
             }
             
-            // Convertir factura_path a URL pública completa
+            // Convertir factura_path a URL(s) pública(s)
+            $urlsFacturas = [];
             if (!empty($cita->factura_path)) {
-                $cita->factura_url = \Illuminate\Support\Facades\Storage::url($cita->factura_path);
+                $rawPath = trim($cita->factura_path);
+                if (str_starts_with($rawPath, '[')) {
+                    $decoded = json_decode($rawPath, true);
+                    if (is_array($decoded)) {
+                        foreach ($decoded as $idx => $p) {
+                            $urlsFacturas[] = [
+                                'url' => \Illuminate\Support\Facades\Storage::url($p),
+                                'nombre' => 'Factura ' . ($idx + 1),
+                                'path' => $p,
+                            ];
+                        }
+                    }
+                }
+                if (empty($urlsFacturas)) {
+                    $urlsFacturas[] = [
+                        'url' => \Illuminate\Support\Facades\Storage::url($rawPath),
+                        'nombre' => 'Factura 1',
+                        'path' => $rawPath,
+                    ];
+                }
+                $cita->factura_url = $urlsFacturas[0]['url'];
+                $cita->facturas_urls = $urlsFacturas;
             } else {
                 $cita->factura_url = null;
+                $cita->facturas_urls = [];
             }
 
             // OCR Conciliación Info
@@ -1907,7 +1921,9 @@ class CitaController extends Controller
             'tipo_vehiculo' => 'nullable|string',
             'categoria_sugerida' => 'nullable|string',
             'tipo_mercancia' => 'nullable|string',
-            'factura_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'factura_file' => 'nullable',
+            'factura_files' => 'nullable|array',
+            'factura_files.*' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:15360',
             'email_contacto' => 'nullable|email',
         ]);
 
@@ -1967,10 +1983,8 @@ class CitaController extends Controller
             return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
         }
 
-        // Verificar muelle considerando muelles equivalentes de la misma sede física
-        $muellesEquiv = self::getMuellesEquivalentes($validated['muelle_asignado']);
+        // Verificar disponibilidad global de horario (independientemente del muelle o producto)
         $citasExistentes = DB::table('appointments')
-            ->whereIn('muelle_asignado', $muellesEquiv)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
@@ -1980,7 +1994,7 @@ class CitaController extends Controller
             $finExistente = $inicioExistente->copy()->addMinutes((int) $cita->duracion_minutos);
 
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto: Este muelle/sede ya tiene una cita de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})"], 422);
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
             }
         }
 
@@ -2004,10 +2018,33 @@ class CitaController extends Controller
         }
         $catId = $catModel ? $catModel->id : null;
 
-        // Subir archivo de factura si existe
-        $facturaPath = null;
+        // Subir archivo(s) de factura(s) si existen (admite múltiples facturas)
+        $savedFacturaPaths = [];
+        if ($request->hasFile('factura_files')) {
+            foreach ($request->file('factura_files') as $file) {
+                if ($file && $file->isValid()) {
+                    $savedFacturaPaths[] = $file->store('facturas', 'public');
+                }
+            }
+        }
         if ($request->hasFile('factura_file')) {
-            $facturaPath = $request->file('factura_file')->store('facturas', 'public');
+            $f = $request->file('factura_file');
+            if (is_array($f)) {
+                foreach ($f as $file) {
+                    if ($file && $file->isValid()) {
+                        $savedFacturaPaths[] = $file->store('facturas', 'public');
+                    }
+                }
+            } elseif ($f && $f->isValid()) {
+                $savedFacturaPaths[] = $f->store('facturas', 'public');
+            }
+        }
+
+        $facturaPath = null;
+        if (count($savedFacturaPaths) === 1) {
+            $facturaPath = $savedFacturaPaths[0];
+        } elseif (count($savedFacturaPaths) > 1) {
+            $facturaPath = json_encode(array_values(array_unique($savedFacturaPaths)));
         }
 
         // Recuperar quién la habilitó para enviarle notificación
@@ -2291,15 +2328,49 @@ class CitaController extends Controller
         $validated = $request->validate([
             'numero_factura' => 'required|string',
             'peso_factura_ton' => 'required|numeric',
-            'factura_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            'factura_file' => 'nullable',
+            'factura_files' => 'nullable|array',
+            'factura_files.*' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:15360',
         ]);
 
-        $facturaPath = $cita->factura_path;
-        if ($request->hasFile('factura_file')) {
-            if ($facturaPath) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($facturaPath);
+        $savedFacturaPaths = [];
+        if ($request->hasFile('factura_files')) {
+            foreach ($request->file('factura_files') as $file) {
+                if ($file && $file->isValid()) {
+                    $savedFacturaPaths[] = $file->store('facturas', 'public');
+                }
             }
-            $facturaPath = $request->file('factura_file')->store('facturas', 'public');
+        }
+        if ($request->hasFile('factura_file')) {
+            $f = $request->file('factura_file');
+            if (is_array($f)) {
+                foreach ($f as $file) {
+                    if ($file && $file->isValid()) {
+                        $savedFacturaPaths[] = $file->store('facturas', 'public');
+                    }
+                }
+            } elseif ($f && $f->isValid()) {
+                $savedFacturaPaths[] = $f->store('facturas', 'public');
+            }
+        }
+
+        $facturaPath = $cita->factura_path;
+        if (!empty($savedFacturaPaths)) {
+            if ($facturaPath) {
+                if (str_starts_with(trim($facturaPath), '[')) {
+                    $oldPaths = json_decode($facturaPath, true) ?: [];
+                    foreach ($oldPaths as $op) {
+                        \Illuminate\Support\Facades\Storage::disk('public')->delete($op);
+                    }
+                } else {
+                    \Illuminate\Support\Facades\Storage::disk('public')->delete($facturaPath);
+                }
+            }
+            if (count($savedFacturaPaths) === 1) {
+                $facturaPath = $savedFacturaPaths[0];
+            } else {
+                $facturaPath = json_encode(array_values(array_unique($savedFacturaPaths)));
+            }
         }
 
         $pesoTon = (float) $validated['peso_factura_ton'];

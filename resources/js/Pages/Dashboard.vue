@@ -217,6 +217,8 @@ watch(mostrarModalVideo, (val) => {
     }
 });
 
+const formFacturaFiles = ref([]);
+
 const abrirModalSubirFactura = (cita) => {
     citaSubirFactura.value = cita;
     formFactura.value = {
@@ -224,12 +226,24 @@ const abrirModalSubirFactura = (cita) => {
         peso_factura_ton: '',
         factura_file: null
     };
+    formFacturaFiles.value = [];
     errorFactura.value = '';
     mostrarModalSubirFactura.value = true;
 };
 
 const handleFacturaFileUpload = (e) => {
-    formFactura.value.factura_file = e.target.files[0];
+    const selected = Array.from(e.target.files || []);
+    for (const f of selected) {
+        if (!formFacturaFiles.value.some(x => x.name === f.name && x.size === f.size)) {
+            formFacturaFiles.value.push(f);
+        }
+    }
+    formFactura.value.factura_file = formFacturaFiles.value[0] || null;
+};
+
+const quitarFacturaSubida = (index) => {
+    formFacturaFiles.value.splice(index, 1);
+    formFactura.value.factura_file = formFacturaFiles.value[0] || null;
 };
 
 const guardarNuevaFactura = async () => {
@@ -241,7 +255,12 @@ const guardarNuevaFactura = async () => {
     const formData = new FormData();
     formData.append('numero_factura', formFactura.value.numero_factura);
     formData.append('peso_factura_ton', formFactura.value.peso_factura_ton);
-    if (formFactura.value.factura_file) {
+    if (formFacturaFiles.value.length > 0) {
+        formFacturaFiles.value.forEach(f => {
+            formData.append('factura_files[]', f);
+        });
+        formData.append('factura_file', formFacturaFiles.value[0]);
+    } else if (formFactura.value.factura_file) {
         formData.append('factura_file', formFactura.value.factura_file);
     }
 
@@ -355,6 +374,77 @@ const confirmarFinalizar = async () => {
 };
 
 // Filtro por tipo de mercancía (Secos, Fruver, Perecederos)
+// Modal y funciones de Conciliación OCR
+const mostrarModalOcr = ref(false);
+const citaOcr = ref(null);
+const analizandoOcr = ref(false);
+const resultadoOcr = ref(null);
+const errorOcr = ref('');
+
+const getBadgeOcrClass = (estatus) => {
+    if (estatus === 'conforme') return 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200';
+    if (estatus === 'discrepancia') return 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200';
+    return 'bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200';
+};
+
+const getIconoOcr = (estatus) => {
+    if (estatus === 'conforme') return '🟢';
+    if (estatus === 'discrepancia') return '⚠️';
+    return '🔍';
+};
+
+const getTextoOcr = (estatus) => {
+    if (estatus === 'conforme') return 'Factura Conciliada (OK)';
+    if (estatus === 'discrepancia') return 'Discrepancia con ODC';
+    return 'Analizar con OCR';
+};
+
+const abrirModalOcr = async (cita) => {
+    citaOcr.value = cita;
+    errorOcr.value = '';
+    resultadoOcr.value = null;
+    mostrarModalOcr.value = true;
+
+    try {
+        const res = await axios.get(`/api/citas/${cita.id}/conciliacion-factura`);
+        if (res.data.status === 'success') {
+            resultadoOcr.value = res.data;
+        } else {
+            ejecutarAnalisisOcr();
+        }
+    } catch (e) {
+        ejecutarAnalisisOcr();
+    }
+};
+
+const ejecutarAnalisisOcr = async () => {
+    if (!citaOcr.value) return;
+    analizandoOcr.value = true;
+    errorOcr.value = '';
+    try {
+        const res = await axios.post(`/api/citas/${citaOcr.value.id}/analizar-factura`);
+        if (res.data.status === 'success') {
+            resultadoOcr.value = {
+                estatus_conciliacion: res.data.estatus_conciliacion,
+                resumen_discrepancias: res.data.resumen_discrepancias,
+                total_factura: res.data.conciliacion.total_factura,
+                total_odc: res.data.conciliacion.total_odc,
+                diferencia_total: res.data.conciliacion.diferencia_total,
+                numero_factura: res.data.datos_factura.numero_factura,
+                renglones: res.data.conciliacion.renglones,
+                fecha_analisis: new Date(),
+            };
+            citaOcr.value.ocr_estatus = res.data.estatus_conciliacion;
+            citaOcr.value.ocr_resumen = res.data.resumen_discrepancias;
+            cargarCitas();
+        }
+    } catch (e) {
+        errorOcr.value = e.response?.data?.error || 'Error al procesar la factura con OCR.';
+    } finally {
+        analizandoOcr.value = false;
+    }
+};
+
 const filtroTipoMercancia = ref('todos'); // 'todos', 'secos', 'fruver', 'perecederos'
 
 const obtenerTipoCita = (tipoMercancia) => {
@@ -980,12 +1070,31 @@ const getSucursalNombre = (codigo) => {
                                                 <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Factura Proveedor</p>
                                                 <p class="text-xs font-bold text-emerald-900 font-mono">{{ cita.numero_factura }}</p>
                                             </div>
-                                            <div class="flex items-center gap-2">
-                                                <a v-if="cita.factura_url" :href="cita.factura_url" target="_blank"
+                                            <div class="flex items-center gap-1.5 flex-wrap">
+                                                <template v-if="cita.facturas_urls && cita.facturas_urls.length > 1">
+                                                    <a v-for="(fUrl, fIdx) in cita.facturas_urls" :key="fIdx" :href="fUrl.url" target="_blank"
+                                                        class="bg-emerald-600 text-white px-2.5 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm text-[10px] font-bold flex items-center gap-1" :title="'Ver ' + fUrl.nombre">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                                        {{ fUrl.nombre }}
+                                                    </a>
+                                                </template>
+                                                <a v-else-if="cita.factura_url" :href="cita.factura_url" target="_blank"
                                                     class="bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm text-[10px] font-bold flex items-center gap-1.5" title="Ver / Descargar Factura">
                                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                                     Ver Factura
                                                 </a>
+                                                <!-- Botón / Badge OCR Conciliación -->
+                                                <button 
+                                                    v-if="cita.factura_url && ['admin', 'receptor'].includes($page.props.auth.user.role)"
+                                                    @click.stop="abrirModalOcr(cita)"
+                                                    type="button"
+                                                    class="px-2.5 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                                                    :class="getBadgeOcrClass(cita.ocr_estatus)"
+                                                    :title="cita.ocr_resumen || 'Conciliación OCR con ODC'"
+                                                >
+                                                    <span>{{ getIconoOcr(cita.ocr_estatus) }}</span>
+                                                    <span>{{ getTextoOcr(cita.ocr_estatus) }}</span>
+                                                </button>
                                                 <span v-else class="text-[10px] text-emerald-500 italic">Sin archivo</span>
                                             </div>
                                         </div>
@@ -1612,8 +1721,14 @@ const getSucursalNombre = (codigo) => {
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-bold text-slate-700">Archivo de Factura (PDF/Imagen)</label>
-                            <input type="file" @change="handleFacturaFileUpload" accept=".pdf,image/*" required class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
+                            <label class="block text-sm font-bold text-slate-700">Archivos de Factura (PDF/Imagen) <span class="text-xs font-normal text-emerald-600">(Puede adjuntar varias facturas)</span></label>
+                            <input type="file" multiple @change="handleFacturaFileUpload" accept=".pdf,image/*" :required="formFacturaFiles.length === 0 && !formFactura.factura_file" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer">
+                            <div v-if="formFacturaFiles.length > 0" class="mt-2 space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                                <div v-for="(f, fIdx) in formFacturaFiles" :key="f.name + fIdx" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
+                                    <span class="font-bold truncate">📄 {{ f.name }} <span class="text-[10px] font-normal text-emerald-600">({{ (f.size / 1024).toFixed(0) }} KB)</span></span>
+                                    <button type="button" @click="quitarFacturaSubida(fIdx)" class="text-red-600 hover:text-red-800 font-bold ml-2 underline text-[11px] cursor-pointer">✕ Quitar</button>
+                                </div>
+                            </div>
                         </div>
                         <p v-if="errorFactura" class="text-red-500 text-sm font-medium">{{ errorFactura }}</p>
                     </div>
@@ -1800,5 +1915,183 @@ const getSucursalNombre = (codigo) => {
                 </div>
             </div>
         </div>
+            <!-- Modal Conciliación Inteligente OCR vs ODC -->
+        <Modal :show="mostrarModalOcr" @close="mostrarModalOcr = false" maxWidth="4xl">
+            <div class="p-6 sm:p-8 space-y-6">
+                <!-- Header -->
+                <div class="flex items-start justify-between border-b pb-4">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">🔍</span>
+                            <h3 class="text-xl font-black text-slate-800">Conciliación Inteligente: Factura vs ODC</h3>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-1">
+                            Orden: <strong class="text-sky-600 font-mono">{{ citaOcr?.numero_oc }}</strong> · Proveedor: <strong class="text-slate-700">{{ citaOcr?.proveedor }}</strong>
+                        </p>
+                    </div>
+                    <button @click="mostrarModalOcr = false" class="text-slate-400 hover:text-slate-600 text-xl font-bold">✕</button>
+                </div>
+
+                <!-- Estado de Carga -->
+                <div v-if="analizandoOcr" class="text-center py-12 space-y-3">
+                    <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-sky-600 border-t-transparent"></div>
+                    <div class="text-sm font-bold text-slate-700">Analizando factura con Inteligencia Artificial (Gemini Vision)...</div>
+                    <p class="text-xs text-slate-400">Extrayendo números de factura, productos, cantidades y comparando con la ODC...</p>
+                </div>
+
+                <!-- Error -->
+                <div v-else-if="errorOcr" class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs space-y-2">
+                    <div class="font-bold flex items-center gap-1"><span>❌</span> No se pudo completar el análisis OCR:</div>
+                    <p>{{ errorOcr }}</p>
+                    <button @click="ejecutarAnalisisOcr" class="px-3 py-1.5 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700">Reintentar</button>
+                </div>
+
+                <!-- Contenido Conciliado -->
+                <div v-else-if="resultadoOcr" class="space-y-6">
+                    <!-- Banner de Resumen -->
+                    <div 
+                        class="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        :class="resultadoOcr.estatus_conciliacion === 'conforme' ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'"
+                    >
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg">{{ resultadoOcr.estatus_conciliacion === 'conforme' ? '🟢' : '⚠️' }}</span>
+                                <span class="text-sm font-black uppercase tracking-wide">
+                                    {{ resultadoOcr.estatus_conciliacion === 'conforme' ? 'Factura 100% Conforme y Cuadrada' : 'Discrepancia Detectada entre Factura y ODC' }}
+                                </span>
+                            </div>
+                            <p class="text-xs font-medium opacity-90">{{ resultadoOcr.resumen_discrepancias }}</p>
+                        </div>
+
+                        <div class="flex items-center gap-4 text-xs font-mono bg-white/80 px-4 py-2.5 rounded-xl border border-black/5">
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase block">Total ODC</span>
+                                <span class="font-bold text-slate-800">${{ Number(resultadoOcr.total_odc || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) }}</span>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase block">Total Factura</span>
+                                <span class="font-bold text-slate-800">${{ Number(resultadoOcr.total_factura || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) }}</span>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase block">Diferencia</span>
+                                <span 
+                                    class="font-black"
+                                    :class="Math.abs(resultadoOcr.diferencia_total || 0) < 0.05 ? 'text-emerald-600' : 'text-red-600'"
+                                >
+                                    ${{ Number(resultadoOcr.diferencia_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de Renglones Comparados -->
+                    <div class="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                        <div class="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+                            <span class="text-xs font-black text-slate-700 uppercase tracking-wider">Comparativa Renglón por Renglón</span>
+                            <span class="text-[11px] text-slate-500">Factura #<strong>{{ resultadoOcr.numero_factura || citaOcr?.numero_factura }}</strong></span>
+                        </div>
+
+                        <div class="overflow-x-auto max-h-96">
+                            <table class="w-full text-left text-xs">
+                                <thead class="bg-slate-50 text-slate-600 border-b border-slate-200 text-[11px]">
+                                    <tr>
+                                        <th class="p-3">Ítem ODC</th>
+                                        <th class="p-3 text-center">Cant. Pedida</th>
+                                        <th class="p-3">Ítem Detectado en Factura</th>
+                                        <th class="p-3 text-center">Cant. Facturada</th>
+                                        <th class="p-3 text-center">Diferencia</th>
+                                        <th class="p-3 text-right">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                    <tr 
+                                        v-for="(r, idx) in resultadoOcr.renglones" 
+                                        :key="idx"
+                                        :class="r.estado === 'coincide' ? 'hover:bg-slate-50' : (r.estado === 'faltante' ? 'bg-amber-50/50 hover:bg-amber-50' : 'bg-red-50/50 hover:bg-red-50')"
+                                    >
+                                        <td class="p-3 font-medium text-slate-800 max-w-[180px]">
+                                            <div class="font-bold truncate" :title="r.descripcion_odc">{{ r.descripcion_odc || '(No en ODC)' }}</div>
+                                            <div class="text-[10px] font-mono text-slate-400">{{ r.codigo_odc || '-' }}</div>
+                                        </td>
+                                        <td class="p-3 text-center font-bold text-slate-700">{{ r.cantidad_odc }}</td>
+                                        <td class="p-3 font-medium text-slate-800 max-w-[180px]">
+                                            <div class="font-bold truncate" :title="r.descripcion_factura">{{ r.descripcion_factura || '(No en Factura)' }}</div>
+                                            <div class="text-[10px] font-mono text-slate-400">{{ r.codigo_factura || '-' }}</div>
+                                        </td>
+                                        <td class="p-3 text-center font-bold text-slate-700">{{ r.cantidad_factura }}</td>
+                                        <td class="p-3 text-center font-mono font-bold" :class="r.diferencia === 0 ? 'text-emerald-600' : (r.diferencia < 0 ? 'text-amber-600' : 'text-red-600')">
+                                            {{ r.diferencia > 0 ? '+' : '' }}{{ r.diferencia }}
+                                        </td>
+                                        <td class="p-3 text-right">
+                                            <span 
+                                                v-if="r.estado === 'coincide'" 
+                                                class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800"
+                                            >
+                                                🟢 Coincide
+                                            </span>
+                                            <span 
+                                                v-else-if="r.estado === 'faltante'" 
+                                                class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800"
+                                            >
+                                                🟡 Faltante
+                                            </span>
+                                            <span 
+                                                v-else-if="r.estado === 'excedente'" 
+                                                class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800"
+                                            >
+                                                🔴 Excedente
+                                            </span>
+                                            <span 
+                                                v-else-if="r.estado === 'no_solicitado'" 
+                                                class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-800"
+                                            >
+                                                ❌ No Pedido
+                                            </span>
+                                            <span 
+                                                v-else 
+                                                class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600"
+                                            >
+                                                ⚠️ No Facturado
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="resultadoOcr.renglones.length === 0">
+                                        <td colspan="6" class="p-6 text-center text-slate-400">No se detectaron renglones comparables en esta factura.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Acciones del Modal -->
+                    <div class="flex items-center justify-between pt-4 border-t border-slate-100">
+                        <div class="flex items-center gap-2">
+                            <a 
+                                v-if="citaOcr?.factura_url" 
+                                :href="citaOcr.factura_url" 
+                                target="_blank"
+                                class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+                            >
+                                <span>📄</span> Ver Documento Original
+                            </a>
+                            <button 
+                                @click="ejecutarAnalisisOcr" 
+                                :disabled="analizandoOcr"
+                                class="px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold rounded-xl transition flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                                <span>🔄</span> Re-analizar con OCR
+                            </button>
+                        </div>
+
+                        <button 
+                            @click="mostrarModalOcr = false" 
+                            class="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
     </AuthenticatedLayout>
 </template>

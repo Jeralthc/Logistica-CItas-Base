@@ -927,15 +927,28 @@ const formProveedor = ref({
     muelle_asignado: '',
     email_contacto: ''
 });
-const facturaFile = ref(null);
+const facturaFiles = ref([]);
+const facturaFile = computed(() => facturaFiles.value[0] || null);
 const errorFormProveedor = ref('');
 
 const handleFacturaUpload = (event) => {
-    facturaFile.value = event.target.files[0] || null;
+    const selected = Array.from(event.target.files || []);
+    if (selected.length > 0) {
+        for (const file of selected) {
+            const yaExiste = facturaFiles.value.some(f => f.name === file.name && f.size === file.size);
+            if (!yaExiste) {
+                facturaFiles.value.push(file);
+            }
+        }
+    }
 };
 
-const quitarFacturaFile = () => {
-    facturaFile.value = null;
+const quitarFacturaFile = (index = null) => {
+    if (index !== null && index >= 0) {
+        facturaFiles.value.splice(index, 1);
+    } else {
+        facturaFiles.value = [];
+    }
     const input = document.getElementById('facturaFileInput');
     if (input) input.value = '';
 };
@@ -1015,7 +1028,7 @@ const abrirModalProveedor = (odc) => {
     formProveedor.value.tipo_mercancia = odc.categoria_sugerida || 'Alimentos 1 (Viveres)';
     formProveedor.value.peso_factura_ton = odc.peso_estimado_ton || 0;
     formProveedor.value.email_contacto = usePage().props.auth.user.email;
-    facturaFile.value = null;
+    facturaFiles.value = [];
     editarCorreo.value = false;
     errorFormProveedor.value = '';
     
@@ -1129,8 +1142,11 @@ const reservarComoProveedor = async () => {
         Object.keys(formProveedor.value).forEach(key => {
             data.append(key, formProveedor.value[key]);
         });
-        if (facturaFile.value) {
-            data.append('factura_file', facturaFile.value);
+        if (facturaFiles.value.length > 0) {
+            facturaFiles.value.forEach(f => {
+                data.append('factura_files[]', f);
+            });
+            data.append('factura_file', facturaFiles.value[0]);
         }
 
         let resp;
@@ -1361,7 +1377,16 @@ onMounted(cargarCitas);
                                             <span v-if="cita.numero_factura" class="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded uppercase flex items-center gap-1">
                                                 📄 Factura: {{ cita.numero_factura }}
                                             </span>
-                                            <a v-if="cita.factura_url" :href="cita.factura_url" target="_blank" 
+                                            <template v-if="cita.facturas_urls && cita.facturas_urls.length > 1">
+                                                <div class="flex items-center gap-1 flex-wrap">
+                                                    <a v-for="(fUrl, fIdx) in cita.facturas_urls" :key="fIdx" :href="fUrl.url" target="_blank"
+                                                        class="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-0.5 rounded transition-colors flex items-center gap-1"
+                                                        :title="'Ver ' + fUrl.nombre">
+                                                        👁️ {{ fUrl.nombre }}
+                                                    </a>
+                                                </div>
+                                            </template>
+                                            <a v-else-if="cita.factura_url" :href="cita.factura_url" target="_blank" 
                                                 class="text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-0.5 rounded transition-colors flex items-center gap-1"
                                                 title="Ver factura adjunta">
                                                 👁️ Ver Factura
@@ -2203,15 +2228,17 @@ onMounted(cargarCitas);
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-bold text-slate-700">Archivo de Factura (PDF/Imagen)</label>
-                                    <input id="facturaFileInput" type="file" @change="handleFacturaUpload" accept=".pdf,image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-red-50 file:text-red-700 hover:file:bg-red-100">
-                                    <div v-if="facturaFile" class="mt-2 flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
-                                        <span class="font-bold flex items-center gap-1.5 truncate">
-                                            📎 {{ facturaFile.name }}
-                                        </span>
-                                        <button type="button" @click="quitarFacturaFile" class="text-red-600 hover:text-red-800 font-bold ml-2 underline text-[11px] flex-shrink-0">
-                                            ✕ Quitar archivo
-                                        </button>
+                                    <label class="block text-sm font-bold text-slate-700">Archivos de Factura (PDF/Imagen) <span class="text-xs font-normal text-blue-600">(Puede adjuntar varias facturas)</span></label>
+                                    <input id="facturaFileInput" type="file" multiple @change="handleFacturaUpload" accept=".pdf,image/*" class="mt-1 block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+                                    <div v-if="facturaFiles.length > 0" class="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                        <div v-for="(f, idx) in facturaFiles" :key="f.name + idx" class="flex items-center justify-between p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
+                                            <span class="font-bold flex items-center gap-1.5 truncate">
+                                                📄 {{ f.name }} <span class="text-[10px] font-normal text-emerald-600">({{ (f.size / 1024).toFixed(0) }} KB)</span>
+                                            </span>
+                                            <button type="button" @click="quitarFacturaFile(idx)" class="text-red-600 hover:text-red-800 font-bold ml-2 underline text-[11px] flex-shrink-0 cursor-pointer">
+                                                ✕ Quitar
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
