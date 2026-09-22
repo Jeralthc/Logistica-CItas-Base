@@ -312,3 +312,17 @@ Route::get('/post-deploy-webpush', function () {
     ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 });
 
+
+
+// --- RUTAS ENTERPRISE LOGÍSTICA BASE ---
+use App\Http\Controllers\GaritaController;
+use App\Http\Controllers\KpiLogisticaController;
+use App\Http\Controllers\ErpUniversalController;
+use App\Http\Controllers\CompanySettingController;
+
+Route::middleware(['auth'])->group(function () {
+    Route::get('/garita', [GaritaController::class, 'index'])->name('garita.index');
+    Route::get('/kpis-logistica', [KpiLogisticaController::class, 'index'])->name('kpis.index');
+    Route::get('/conectores-erp', [ErpUniversalController::class, 'index'])->name('conectores.index');
+    Route::get('/configuracion-empresa', [CompanySettingController::class, 'index'])->name('empresa.index');
+});

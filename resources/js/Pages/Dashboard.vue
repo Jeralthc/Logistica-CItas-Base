@@ -334,6 +334,72 @@ const abrirModalFinalizar = (cita) => {
     mostrarModalFinalizar.value = true;
 };
 
+const modoEpod = ref(false);
+const epodForm = ref({
+    estado_mercancia: 'conforme',
+    observaciones_recepcion: '',
+    chofer_nombre: '',
+    chofer_cedula: '',
+    chofer_firma: '',
+});
+
+const canvasFirma = ref(null);
+let dibujando = false;
+
+const iniciarDibujo = (e) => {
+    dibujando = true;
+    dibujar(e);
+};
+
+const detenerDibujo = () => {
+    dibujando = false;
+    if (canvasFirma.value) {
+        epodForm.value.chofer_firma = canvasFirma.value.toDataURL('image/png');
+    }
+};
+
+const dibujar = (e) => {
+    if (!dibujando || !canvasFirma.value) return;
+    const ctx = canvasFirma.value.getContext('2d');
+    const rect = canvasFirma.value.getBoundingClientRect();
+    const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
+    const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
+
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#0f172a';
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+};
+
+const limpiarFirma = () => {
+    if (canvasFirma.value) {
+        const ctx = canvasFirma.value.getContext('2d');
+        ctx.clearRect(0, 0, canvasFirma.value.width, canvasFirma.value.height);
+        ctx.beginPath();
+        epodForm.value.chofer_firma = '';
+    }
+};
+
+const guardarEpodCompleto = async () => {
+    if (!citaFinalizar.value) return;
+    try {
+        procesandoFinalizar.value = true;
+        await axios.post(`/api/epod/citas/${citaFinalizar.value.id}/guardar`, epodForm.value);
+        mostrarModalFinalizar.value = false;
+        citaFinalizar.value = null;
+        limpiarFirma();
+        cargarCitas();
+    } catch (e) {
+        errorFinalizar.value = e.response?.data?.error || 'Error al guardar acta e-POD';
+    } finally {
+        procesandoFinalizar.value = false;
+    }
+};
+
 const confirmarFinalizar = async () => {
     if (!citaFinalizar.value) return;
     const oc = citaFinalizar.value.numero_oc;

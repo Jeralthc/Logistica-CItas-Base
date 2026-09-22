@@ -478,6 +478,34 @@ const tieneModulo = (modulo) => {
                                     {{ $page.props.auth.user.role === 'comprador' ? '📡 Monitor & Trazabilidad' : 'Monitoreo & Auditoría' }}
                                 </NavLink>
                                 <NavLink
+                                    :href="route('garita.index')"
+                                    :active="route().current('garita.*')"
+                                    v-if="tieneModulo('garita') || $page.props.auth.user.role === 'admin' || $page.props.auth.user.role === 'superadmin'"
+                                >
+                                    🛡️ Garita
+                                </NavLink>
+                                <NavLink
+                                    :href="route('kpis.index')"
+                                    :active="route().current('kpis.*')"
+                                    v-if="tieneModulo('kpis') || $page.props.auth.user.role === 'admin' || $page.props.auth.user.role === 'superadmin'"
+                                >
+                                    📊 KPIs
+                                </NavLink>
+                                <NavLink
+                                    :href="route('conectores.index')"
+                                    :active="route().current('conectores.*')"
+                                    v-if="tieneModulo('conectores') || $page.props.auth.user.role === 'admin' || $page.props.auth.user.role === 'superadmin'"
+                                >
+                                    🔌 Conectores ERP
+                                </NavLink>
+                                <NavLink
+                                    :href="route('empresa.index')"
+                                    :active="route().current('empresa.*')"
+                                    v-if="tieneModulo('empresa') || $page.props.auth.user.role === 'admin' || $page.props.auth.user.role === 'superadmin'"
+                                >
+                                    🏢 Empresa
+                                </NavLink>
+                                <NavLink
                                     v-if="tieneModulo('configuracion_erp')"
                                     :href="route('configuracion-erp')"
                                     :active="route().current('configuracion-erp')"
