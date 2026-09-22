@@ -707,13 +707,15 @@ class CitaController extends Controller
             if ($emailLog && !empty($emailLog->created_at)) {
                 $fechaEnvio = $emailLog->created_at;
             } elseif ($syncRow) {
-                $fueHabilitada = in_array($syncRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRow->habilitada_por_user_id);
-                if ($fueHabilitada && !empty($syncRow->updated_at) && $syncRow->updated_at != $syncRow->created_at) {
-                    $fechaEnvio = $syncRow->updated_at;
-                } elseif (!empty($syncRow->fecha_emision)) {
+                $srCreated = $syncRow->created_at ?? null;
+                $srUpdated = $syncRow->updated_at ?? null;
+                $fueHabilitada = in_array($syncRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRow->habilitada_por_user_id ?? null);
+                if ($fueHabilitada && !empty($srUpdated) && $srUpdated != $srCreated) {
+                    $fechaEnvio = $srUpdated;
+                } elseif (!empty($syncRow->fecha_emision ?? null)) {
                     $fechaEnvio = $syncRow->fecha_emision;
-                } elseif (!empty($syncRow->created_at)) {
-                    $fechaEnvio = $syncRow->created_at;
+                } elseif (!empty($srCreated)) {
+                    $fechaEnvio = $srCreated;
                 }
             }
             
@@ -756,6 +758,24 @@ class CitaController extends Controller
                 $cita->factura_url = \Illuminate\Support\Facades\Storage::url($cita->factura_path);
             } else {
                 $cita->factura_url = null;
+            }
+
+            // OCR Conciliación Info
+            $ocrRow = null;
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('invoice_ocr_analyses')) {
+                    $ocrRow = DB::table('invoice_ocr_analyses')->where('appointment_id', $cita->id)->first();
+                }
+            } catch (\Throwable $e) {}
+
+            if ($ocrRow) {
+                $cita->ocr_estatus = $ocrRow->estatus_conciliacion;
+                $cita->ocr_resumen = $ocrRow->resumen_discrepancias;
+                $cita->ocr_diferencia = $ocrRow->diferencia_total;
+            } else {
+                $cita->ocr_estatus = !empty($cita->factura_path) ? 'pendiente_analisis' : 'sin_factura';
+                $cita->ocr_resumen = null;
+                $cita->ocr_diferencia = null;
             }
             
             // Si no hay vendedor_nombre (no hay contacto vinculado), usar el nombre del usuario proveedor que creó la cita

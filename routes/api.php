@@ -198,37 +198,3 @@ Route::middleware(['throttle:60,1', 'erp.api'])->group(function () {
 
     Route::post('/sync/recibir', [App\Http\Controllers\SyncController::class, 'recibir']);
 });
-
-// --- APIS ENTERPRISE LOGÍSTICA BASE ---
-use App\Http\Controllers\GaritaController;
-use App\Http\Controllers\KpiLogisticaController;
-use App\Http\Controllers\ErpUniversalController;
-use App\Http\Controllers\EpodController;
-use App\Http\Controllers\CompanySettingController;
-
-// Garita & Patio (YMS)
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/garita/validar-qr', [GaritaController::class, 'validarQr']);
-    Route::post('/garita/citas/{id}/checkin', [GaritaController::class, 'registrarEntrada']);
-    Route::post('/garita/citas/{id}/llamar-muelle', [GaritaController::class, 'llamarMuelle']);
-    Route::post('/garita/citas/{id}/salida', [GaritaController::class, 'registrarSalida']);
-
-    // Conectores ERP
-    Route::post('/conectores-erp/importar-excel', [ErpUniversalController::class, 'importarExcel']);
-    Route::post('/conectores-erp/api-keys', [ErpUniversalController::class, 'generarApiKey']);
-    Route::delete('/conectores-erp/api-keys/{id}', [ErpUniversalController::class, 'eliminarApiKey']);
-
-    // e-POD (Actas Digitales)
-    Route::post('/epod/citas/{id}/guardar', [EpodController::class, 'guardarEpod']);
-    Route::get('/epod/citas/{id}', [EpodController::class, 'obtenerEpod']);
-
-    // Configuración Empresa
-    Route::post('/configuracion-empresa', [CompanySettingController::class, 'guardarAjustes']);
-    Route::post('/configuracion-empresa/almacenes', [CompanySettingController::class, 'crearAlmacen']);
-});
-
-// Plantilla CSV pública para importación
-Route::get('/conectores-erp/plantilla', [ErpUniversalController::class, 'descargarPlantilla']);
-
-// API REST Ingestión Externa Abierta (Autenticada por X-ERP-API-KEY)
-Route::post('/v1/erp/ordenes', [ErpUniversalController::class, 'apiIngestarOdc']);

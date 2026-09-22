@@ -176,13 +176,15 @@ class LogisticaController extends Controller
                 $fEnvio = isset($emailLogs[$numOc]) ? $emailLogs[$numOc]->created_at : null;
                 if (!$fEnvio && isset($syncRows[$numOc])) {
                     $sRow = $syncRows[$numOc];
-                    $fueHab = in_array($sRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($sRow->habilitada_por_user_id);
-                    if ($fueHab && !empty($sRow->updated_at) && $sRow->updated_at != $sRow->created_at) {
-                        $fEnvio = $sRow->updated_at;
-                    } elseif (!empty($sRow->fecha_emision)) {
+                    $sCreated = $sRow->created_at ?? null;
+                    $sUpdated = $sRow->updated_at ?? null;
+                    $fueHab = in_array($sRow->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($sRow->habilitada_por_user_id ?? null);
+                    if ($fueHab && !empty($sUpdated) && $sUpdated != $sCreated) {
+                        $fEnvio = $sUpdated;
+                    } elseif (!empty($sRow->fecha_emision ?? null)) {
                         $fEnvio = $sRow->fecha_emision;
-                    } elseif (!empty($sRow->created_at)) {
-                        $fEnvio = $sRow->created_at;
+                    } elseif (!empty($sCreated)) {
+                        $fEnvio = $sCreated;
                     }
                 }
                 if (!$fEnvio && !empty($o->fecha_emision)) {
@@ -252,7 +254,7 @@ class LogisticaController extends Controller
             $ordenesSync = $querySync
                 ->orderByRaw("CASE WHEN fecha_emision IS NULL OR fecha_emision = '' THEN 1 ELSE 0 END, fecha_emision DESC, numero_oc DESC")
                 ->limit(2000)
-                ->get(['numero_oc', 'resumen_json', 'estatus_habilitacion', 'rif_proveedor', 'updated_at']);
+                ->get(['numero_oc', 'fecha_emision', 'fecha_recepcion', 'proveedor', 'destino', 'resumen_json', 'estatus_habilitacion', 'habilitada_por_user_id', 'rif_proveedor', 'created_at', 'updated_at']);
             
             if (empty($ordenesSync) || (is_object($ordenesSync) && method_exists($ordenesSync, 'isEmpty') && $ordenesSync->isEmpty()) || (is_array($ordenesSync) && count($ordenesSync) === 0)) {
                 $apiUrl = config('app.erp_api_url') ?: env('ERP_API_URL', 'https://citsur.suraki.net/api');
@@ -300,7 +302,7 @@ class LogisticaController extends Controller
                                 })
                                 ->orderByRaw("CASE WHEN fecha_emision IS NULL OR fecha_emision = '' THEN 1 ELSE 0 END, fecha_emision DESC, numero_oc DESC")
                                 ->limit(2000)
-                                ->get(['numero_oc', 'resumen_json', 'estatus_habilitacion', 'updated_at']);
+                                ->get(['numero_oc', 'fecha_emision', 'fecha_recepcion', 'proveedor', 'destino', 'resumen_json', 'estatus_habilitacion', 'habilitada_por_user_id', 'created_at', 'updated_at']);
                         }
                     } catch (\Exception $ex) {}
                 }
@@ -355,13 +357,15 @@ class LogisticaController extends Controller
                     }
                     
                     if (!$fechaEnvio && $row) {
-                        $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id);
-                        if ($fueHabilitada && !empty($row->updated_at) && $row->updated_at != $row->created_at) {
-                            $fechaEnvio = $row->updated_at;
-                        } elseif (!empty($row->fecha_emision)) {
+                        $rowCreated = $row->created_at ?? null;
+                        $rowUpdated = $row->updated_at ?? null;
+                        $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id ?? null);
+                        if ($fueHabilitada && !empty($rowUpdated) && $rowUpdated != $rowCreated) {
+                            $fechaEnvio = $rowUpdated;
+                        } elseif (!empty($row->fecha_emision ?? null)) {
                             $fechaEnvio = $row->fecha_emision;
-                        } elseif (!empty($row->created_at)) {
-                            $fechaEnvio = $row->created_at;
+                        } elseif (!empty($rowCreated)) {
+                            $fechaEnvio = $rowCreated;
                         }
                     }
                     $obj['fecha_envio_comprador'] = $fechaEnvio;
@@ -724,13 +728,15 @@ class LogisticaController extends Controller
                 $emailLogHabilitada = $emailLogs->where('tipo_evento', 'odc_habilitada')->first();
                 $fechaEnvioComprador = $emailLogHabilitada ? $emailLogHabilitada->created_at : null;
                 if (!$fechaEnvioComprador && $row) {
-                    $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id);
-                    if ($fueHabilitada && !empty($row->updated_at) && $row->updated_at != $row->created_at) {
-                        $fechaEnvioComprador = $row->updated_at;
-                    } elseif (!empty($row->fecha_emision)) {
+                    $rCreated = $row->created_at ?? null;
+                    $rUpdated = $row->updated_at ?? null;
+                    $fueHabilitada = in_array($row->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($row->habilitada_por_user_id ?? null);
+                    if ($fueHabilitada && !empty($rUpdated) && $rUpdated != $rCreated) {
+                        $fechaEnvioComprador = $rUpdated;
+                    } elseif (!empty($row->fecha_emision ?? null)) {
                         $fechaEnvioComprador = $row->fecha_emision;
-                    } elseif (!empty($row->created_at)) {
-                        $fechaEnvioComprador = $row->created_at;
+                    } elseif (!empty($rCreated)) {
+                        $fechaEnvioComprador = $rCreated;
                     }
                 }
                 $fechaRegistroCita = $citaActiva ? $citaActiva->created_at : null;
@@ -1215,13 +1221,15 @@ class LogisticaController extends Controller
             $emailLogHabilitada = $emailLogs->where('tipo_evento', 'odc_habilitada')->first();
             $fechaEnvioComprador = $emailLogHabilitada ? $emailLogHabilitada->created_at : null;
             if (!$fechaEnvioComprador && $syncRowLocal) {
-                $fueHabilitada = in_array($syncRowLocal->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRowLocal->habilitada_por_user_id);
-                if ($fueHabilitada && !empty($syncRowLocal->updated_at) && $syncRowLocal->updated_at != $syncRowLocal->created_at) {
-                    $fechaEnvioComprador = $syncRowLocal->updated_at;
-                } elseif (!empty($syncRowLocal->fecha_emision)) {
+                $srCreated = $syncRowLocal->created_at ?? null;
+                $srUpdated = $syncRowLocal->updated_at ?? null;
+                $fueHabilitada = in_array($syncRowLocal->estatus_habilitacion ?? null, ['habilitada', 'agendada']) || !empty($syncRowLocal->habilitada_por_user_id ?? null);
+                if ($fueHabilitada && !empty($srUpdated) && $srUpdated != $srCreated) {
+                    $fechaEnvioComprador = $srUpdated;
+                } elseif (!empty($syncRowLocal->fecha_emision ?? null)) {
                     $fechaEnvioComprador = $syncRowLocal->fecha_emision;
-                } elseif (!empty($syncRowLocal->created_at)) {
-                    $fechaEnvioComprador = $syncRowLocal->created_at;
+                } elseif (!empty($srCreated)) {
+                    $fechaEnvioComprador = $srCreated;
                 }
             }
             $fechaRegistroCita = $citaActiva ? $citaActiva->created_at : null;

@@ -523,24 +523,6 @@ const confirmarCancelacion = async () => {
     }
 };
 
-const modalPaseQr = ref(false);
-const citaPase = ref(null);
-
-const abrirPaseQr = (cita) => {
-    citaPase.value = cita;
-    modalPaseQr.value = true;
-};
-
-const getQrUrl = (cita) => {
-    if (!cita) return '';
-    const data = `CITA:${cita.id}|ODC:${cita.numero_oc}|PROV:${cita.proveedor}|FECHA:${cita.fecha_cita}|MUELLE:${cita.muelle_asignado || '1'}`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(data)}`;
-};
-
-const imprimirPase = () => {
-    window.print();
-};
-
 const abrirModalReprogramar = async (cita) => {
     citaSeleccionada.value = cita;
     motivoReprogramacion.value = '';
@@ -1391,11 +1373,6 @@ onMounted(cargarCitas);
                                 <div class="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
                                     <span :class="statusColor(cita.estatus)" class="text-[10px] font-black px-2.5 py-1 rounded-full uppercase">{{ cita.estatus }}</span>
                                     <div v-if="cita.estatus === 'programada' && (!cita.bloqueado_para_comprador || $page.props.auth?.user?.role !== 'comprador')" class="flex items-center gap-1">
-                                        <button @click="abrirPaseQr(cita)"
-                                            class="text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 rounded-lg flex items-center gap-1 transition shadow-sm mr-1"
-                                            title="Ver Pase Digital con Código QR para Garita">
-                                            <span>🎫</span> Pase QR
-                                        </button>
                                         <button @click="abrirModalReprogramar(cita)"
                                             class="text-slate-400 hover:text-blue-600 transition-colors p-1" title="Reprogramar cita">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
