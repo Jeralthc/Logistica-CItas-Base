@@ -186,14 +186,19 @@ PROMPT;
             }
 
             foreach ($detalles as $d) {
-                $cant = floatval($d['n_CANTIDAD'] ?? $d['cantidad'] ?? 0);
-                $precio = floatval($d['n_PRECIO'] ?? $d['precio_unitario'] ?? $d['precio'] ?? 0);
-                $total = floatval($d['n_TOTAL'] ?? ($cant * $precio));
+                $cant = floatval($d['cantidad_unidades'] ?? $d['n_CANTIDAD'] ?? $d['cantidad'] ?? $d['bultos'] ?? 0);
+                $precio = floatval($d['costo_unitario'] ?? $d['n_PRECIO'] ?? $d['precio_unitario'] ?? $d['precio'] ?? 0);
+                $total = floatval($d['subtotal'] ?? $d['n_TOTAL'] ?? ($cant * $precio));
                 $totalMonto += $total;
 
+                $desc = trim($d['producto'] ?? $d['c_DESCRIPCIO'] ?? $d['descripcion'] ?? '');
+                if (empty($desc)) {
+                    $desc = 'Artículo sin descripción';
+                }
+
                 $articulos[] = [
-                    'codigo' => trim($d['c_CODARTICULO'] ?? $d['codigo'] ?? ''),
-                    'descripcion' => trim($d['c_DESCRIPCIO'] ?? $d['descripcion'] ?? 'Artículo sin descripción'),
+                    'codigo' => trim($d['codigo'] ?? $d['c_CODARTICULO'] ?? ''),
+                    'descripcion' => $desc,
                     'cantidad' => $cant,
                     'precio_unitario' => $precio,
                     'total' => $total,

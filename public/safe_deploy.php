@@ -255,6 +255,33 @@ if (isset($_GET['op']) && $_GET['op'] === 'config_gemini') {
     }
 }
 
+// Acción: Crear o resetear usuario proveedor de prueba
+if (isset($_GET['op']) && $_GET['op'] === 'ensure_test_provider') {
+    try {
+        require_once $baseDir . '/vendor/autoload.php';
+        $app = require_once $baseDir . '/bootstrap/app.php';
+        $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+        $kernel->bootstrap();
+        
+        \App\Models\User::updateOrCreate(
+            ['username' => 'PROVEEDOR.TEST'],
+            [
+                'name' => 'Proveedor de Pruebas Suraki',
+                'email' => 'proveedor.test@suraki.net',
+                'role' => 'proveedor',
+                'rif' => 'J500618832',
+                'activo' => true,
+                'password' => \Illuminate\Support\Facades\Hash::make('Proveedor123*')
+            ]
+        );
+        $message = "Usuario PROVEEDOR.TEST listo en producción. Contraseña: Proveedor123*";
+        $terminalOutput .= "Usuario: PROVEEDOR.TEST\nContraseña: Proveedor123*\nRol: proveedor\nRIF: J500618832\n";
+    } catch (\Throwable $e) {
+        $message = "Error creando usuario de prueba: " . $e->getMessage();
+        $messageType = 'error';
+    }
+}
+
 // Acción: Restaurar Backup
 if (isset($_POST['op']) && $_POST['op'] === 'restore_backup') {
     $filename = basename($_POST['filename'] ?? '');
