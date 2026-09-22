@@ -82,15 +82,16 @@ class OcrInvoiceService
         ];
     }
 
-    /**
+   /**
      * Extrae información estructurada de la factura usando Google Gemini Vision
      */
     protected function extraerDatosConGemini($contenidoArchivo, string $mimeType)
     {
-        $apiKey = config('services.gemini.key') ?: env('GEMINI_API_KEY') ?: 'AIzaSyCQJzs684K66o6leOS0c3rUtjHprkkDlrA';
+        // CORRECCIÓN AQUÍ: Lee estrictamente de la configuración sin fallbacks quemados
+        $apiKey = config('services.gemini.key');
 
-        if (!$apiKey) {
-            throw new \Exception("No se ha configurado la clave de API de Gemini.");
+        if (empty($apiKey)) {
+            throw new \Exception("No se ha configurado la clave de API de Gemini. Verifique el archivo .env (GEMINI_API_KEY).");
         }
 
         $base64Data = base64_encode($contenidoArchivo);
@@ -162,7 +163,6 @@ PROMPT;
         $datosDecodificados['raw_text'] = $textoLimpio;
         return $datosDecodificados;
     }
-
     /**
      * Obtiene los artículos y montos de la ODC desde erp_ordenes_sync
      */
