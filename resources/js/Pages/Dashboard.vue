@@ -1,9 +1,19 @@
 <script setup>
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import Modal from '@/Components/Modal.vue';
-import { Head } from '@inertiajs/vue3';
+import { Head, usePage } from '@inertiajs/vue3';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import axios from 'axios';
+
+const page = usePage();
+const esAdmin = computed(() => {
+    const user = page.props.auth?.user;
+    if (!user) return false;
+    const role = (user.role || '').toLowerCase();
+    const uname = (user.username || '').toLowerCase();
+    const email = (user.email || '').toLowerCase();
+    return role === 'admin' || uname === 'sistemas.jeralthc' || uname.includes('sistemas') || email.includes('sistemas');
+});
 
 const numeroOrden = ref('');
 const datosOrden = ref(null);
@@ -380,6 +390,7 @@ const citaOcr = ref(null);
 const analizandoOcr = ref(false);
 const resultadoOcr = ref(null);
 const errorOcr = ref('');
+const errorOcrDetalleAdmin = ref('');
 
 const getBadgeOcrClass = (estatus) => {
     if (estatus === 'conforme') return 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200';
@@ -402,6 +413,7 @@ const getTextoOcr = (estatus) => {
 const abrirModalOcr = async (cita) => {
     citaOcr.value = cita;
     errorOcr.value = '';
+    errorOcrDetalleAdmin.value = '';
     resultadoOcr.value = null;
     mostrarModalOcr.value = true;
 
@@ -421,6 +433,7 @@ const ejecutarAnalisisOcr = async () => {
     if (!citaOcr.value) return;
     analizandoOcr.value = true;
     errorOcr.value = '';
+    errorOcrDetalleAdmin.value = '';
     try {
         const res = await axios.post(`/api/citas/${citaOcr.value.id}/analizar-factura`);
         if (res.data.status === 'success') {
@@ -439,7 +452,16 @@ const ejecutarAnalisisOcr = async () => {
             cargarCitas();
         }
     } catch (e) {
-        errorOcr.value = e.response?.data?.error || 'Error al procesar la factura con OCR.';
+        const data = e.response?.data;
+        if (esAdmin.value) {
+            // El administrador ve el detalle técnico exacto para diagnóstico
+            errorOcr.value = data?.error || 'Error al procesar la factura con OCR.';
+            errorOcrDetalleAdmin.value = data?.admin_detail || (e.message && e.message !== errorOcr.value ? e.message : '');
+        } else {
+            // Receptores / Operarios / Público: Mensaje sobrio sin detalles técnicos
+            errorOcr.value = (data?.error && !data?.es_admin) ? data.error : 'El servicio de conciliación automática no está disponible en este momento. Por favor realice la verificación de la factura de forma manual.';
+            errorOcrDetalleAdmin.value = '';
+        }
     } finally {
         analizandoOcr.value = false;
     }
@@ -1939,11 +1961,29 @@ const getSucursalNombre = (codigo) => {
                     <p class="text-xs text-slate-400">Extrayendo números de factura, productos, cantidades y comparando con la ODC...</p>
                 </div>
 
-                <!-- Error -->
-                <div v-else-if="errorOcr" class="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs space-y-2">
-                    <div class="font-bold flex items-center gap-1"><span>❌</span> No se pudo completar el análisis OCR:</div>
-                    <p>{{ errorOcr }}</p>
-                    <button @click="ejecutarAnalisisOcr" class="px-3 py-1.5 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700">Reintentar</button>
+                <!-- Error / Mensaje de Estado -->
+                <div v-else-if="errorOcr" class="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs space-y-3">
+                    <div class="flex items-center gap-2 font-bold text-slate-800">
+                        <span class="text-base">ℹ️</span>
+                        <span>Verificación Automática de Factura</span>
+                    </div>
+                    
+                    <p class="text-slate-600 leading-relaxed font-medium">{{ errorOcr }}</p>
+
+                    <!-- Solo para el Administrador (Jeralthc): Detalle técnico confidencial -->
+                    <div v-if="esAdmin && (errorOcrDetalleAdmin || errorOcr)" class="mt-2 p-3 bg-red-50 border border-red-200 rounded-xl text-red-900 font-mono text-[11px] space-y-1">
+                        <div class="font-bold uppercase tracking-wider text-[10px] text-red-600 flex items-center gap-1">
+                            <span>🔒</span> Diagnóstico Técnico (Visible solo para Administrador):
+                        </div>
+                        <div class="break-all whitespace-pre-wrap">{{ errorOcrDetalleAdmin || errorOcr }}</div>
+                    </div>
+
+                    <div class="flex items-center gap-3 pt-1">
+                        <button @click="ejecutarAnalisisOcr" class="px-4 py-1.5 bg-sky-600 text-white rounded-xl font-bold hover:bg-sky-700 transition flex items-center gap-1.5">
+                            <span>🔄</span> Reintentar
+                        </button>
+                        <span class="text-[11px] text-slate-400">Puede continuar con la recepción física en el andén sin interrupción.</span>
+                    </div>
                 </div>
 
                 <!-- Contenido Conciliado -->

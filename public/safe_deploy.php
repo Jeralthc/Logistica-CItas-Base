@@ -228,6 +228,33 @@ if (isset($_GET['op']) && $_GET['op'] === 'migrate') {
     }
 }
 
+// Acción: Configurar GEMINI_API_KEY en .env y limpiar caché
+if (isset($_GET['op']) && $_GET['op'] === 'config_gemini') {
+    $geminiKey = 'AIzaSyCQJzs684K66o6leOS0c3rUtjHprkkDlrA';
+    $envPath = $baseDir . '/.env';
+    if (file_exists($envPath)) {
+        $env = file_get_contents($envPath);
+        if (preg_match('/^GEMINI_API_KEY=.*/m', $env)) {
+            $env = preg_replace('/^GEMINI_API_KEY=.*/m', 'GEMINI_API_KEY=' . $geminiKey, $env);
+        } else {
+            $env = rtrim($env) . "\nGEMINI_API_KEY=" . $geminiKey . "\n";
+        }
+        file_put_contents($envPath, $env);
+        
+        $bootstrapCacheDir = $baseDir . '/bootstrap/cache';
+        if (is_dir($bootstrapCacheDir)) {
+            foreach (glob($bootstrapCacheDir . '/*.php') as $file) {
+                @unlink($file);
+            }
+        }
+        $message = "GEMINI_API_KEY configurada con éxito en .env de producción y caché limpiada.";
+        $terminalOutput .= "GEMINI_API_KEY inyectada en .env.\nCaché de configuración purgada.\n";
+    } else {
+        $message = "Archivo .env no encontrado.";
+        $messageType = 'error';
+    }
+}
+
 // Acción: Restaurar Backup
 if (isset($_POST['op']) && $_POST['op'] === 'restore_backup') {
     $filename = basename($_POST['filename'] ?? '');
@@ -699,6 +726,7 @@ usort($backups, function ($a, $b) {
                     <?php endif; ?>
                     <a href="safe_deploy.php?op=clear_cache" class="btn btn-secondary">Limpiar Caché (Borrado Físico)</a>
                     <a href="safe_deploy.php?op=migrate" class="btn btn-secondary" onclick="return confirm('¿Ejecutar migraciones en la base de datos de producción?')">Ejecutar Migraciones (Artisan)</a>
+                    <a href="safe_deploy.php?op=config_gemini" class="btn btn-secondary">Configurar GEMINI_API_KEY (.env)</a>
                 </div>
 
                 <h3 class="card-title" style="margin-top: 24px; margin-bottom: 12px;">Cargar Parche ZIP Directo</h3>

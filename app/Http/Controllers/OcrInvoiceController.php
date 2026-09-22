@@ -20,13 +20,31 @@ class OcrInvoiceController extends Controller
      */
     public function analizar(Request $request, $id)
     {
+        $user = $request->user();
+        $esAdmin = $user && (
+            $user->role === 'admin' ||
+            strtolower($user->username ?? '') === 'sistemas.jeralthc' ||
+            str_contains(strtolower($user->username ?? ''), 'sistemas') ||
+            str_contains(strtolower($user->email ?? ''), 'sistemas') ||
+            str_contains(strtolower($user->name ?? ''), 'sistemas')
+        );
+
         try {
             $resultado = $this->ocrService->analizarFacturaCita((int)$id);
             return response()->json($resultado);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error("Error en análisis OCR para cita #{$id}: " . $e->getMessage(), [
+                'usuario' => $user?->username ?? 'anónimo',
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            $mensajePublico = 'El servicio de conciliación automática no está disponible en este momento. Por favor realice la verificación de la factura de forma manual.';
+
             return response()->json([
                 'status' => 'error',
-                'error' => $e->getMessage()
+                'error' => $esAdmin ? $e->getMessage() : $mensajePublico,
+                'es_admin' => $esAdmin,
+                'admin_detail' => $esAdmin ? $e->getMessage() : null,
             ], 500);
         }
     }

@@ -87,10 +87,10 @@ class OcrInvoiceService
      */
     protected function extraerDatosConGemini($contenidoArchivo, string $mimeType)
     {
-        $apiKey = config('services.gemini.key') ?: env('GEMINI_API_KEY');
+        $apiKey = config('services.gemini.key') ?: env('GEMINI_API_KEY') ?: 'AIzaSyCQJzs684K66o6leOS0c3rUtjHprkkDlrA';
 
         if (!$apiKey) {
-            throw new \Exception("No se ha configurado la clave de API de Gemini (GEMINI_API_KEY en .env).");
+            throw new \Exception("No se ha configurado la clave de API de Gemini.");
         }
 
         $base64Data = base64_encode($contenidoArchivo);
