@@ -65,6 +65,10 @@ class OcrInvoiceController extends Controller
             ]);
         }
 
+        $totalFac = floatval($analisis->total_factura_extraido ?? 0);
+        $totalOdc = floatval($analisis->total_odc ?? 0);
+        $monedasDifieren = ($totalFac > 0 && $totalOdc > 0 && $totalFac > ($totalOdc * 10));
+
         return response()->json([
             'status' => 'success',
             'estatus_conciliacion' => $analisis->estatus_conciliacion,
@@ -72,6 +76,8 @@ class OcrInvoiceController extends Controller
             'total_factura' => $analisis->total_factura_extraido,
             'total_odc' => $analisis->total_odc,
             'diferencia_total' => $analisis->diferencia_total,
+            'moneda_factura' => $monedasDifieren ? 'VES' : 'USD',
+            'monedas_difieren' => $monedasDifieren,
             'numero_factura' => $analisis->numero_factura_extraido,
             'renglones' => json_decode($analisis->conciliacion_json, true) ?: [],
             'fecha_analisis' => $analisis->updated_at,

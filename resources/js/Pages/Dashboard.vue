@@ -442,6 +442,8 @@ const ejecutarAnalisisOcr = async () => {
                 resumen_discrepancias: res.data.resumen_discrepancias,
                 total_factura: res.data.conciliacion.total_factura,
                 total_odc: res.data.conciliacion.total_odc,
+                moneda_factura: res.data.conciliacion.moneda_factura || 'USD',
+                monedas_difieren: res.data.conciliacion.monedas_difieren || false,
                 diferencia_total: res.data.conciliacion.diferencia_total,
                 numero_factura: res.data.datos_factura.numero_factura,
                 renglones: res.data.conciliacion.renglones,
@@ -2010,9 +2012,13 @@ const getSucursalNombre = (codigo) => {
                             </div>
                             <div>
                                 <span class="text-[10px] text-slate-500 uppercase block">Total Factura</span>
-                                <span class="font-bold text-slate-800">${{ Number(resultadoOcr.total_factura || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) }}</span>
+                                <span class="font-bold text-slate-800">{{ resultadoOcr.moneda_factura === 'VES' ? 'Bs. ' : '$' }}{{ Number(resultadoOcr.total_factura || 0).toLocaleString('en-US', { minimumFractionDigits: 2 }) }}</span>
                             </div>
-                            <div>
+                            <div v-if="resultadoOcr.monedas_difieren">
+                                <span class="text-[10px] text-amber-600 font-bold uppercase block">Moneda</span>
+                                <span class="font-bold text-amber-700 text-[11px] bg-amber-100 px-2 py-0.5 rounded">Bs. vs USD</span>
+                            </div>
+                            <div v-else>
                                 <span class="text-[10px] text-slate-500 uppercase block">Diferencia</span>
                                 <span 
                                     class="font-black"

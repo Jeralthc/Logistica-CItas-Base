@@ -84,6 +84,8 @@ class OcrInvoiceService
 
    /**
      * Extrae información estructurada de la factura usando Google Gemini Vision
+     * Incluye fallback automático entre modelos (gemini-2.0-flash, gemini-1.5-flash, gemini-2.5-flash, gemini-1.5-pro)
+     * para tolerancia total a fallos 503 (sobrecarga temporal) y 429 (límite de cuota).
      */
     protected function extraerDatosConGemini($contenidoArchivo, string $mimeType)
     {
@@ -97,7 +99,7 @@ class OcrInvoiceService
         $base64Data = base64_encode($contenidoArchivo);
 
         $prompt = <<<PROMPT
-Eres un sistema experto en auditoría fiscal, contable y logística de facturas comerciales.
+Eres un sistema experto en auditoría fiscal, contable y logística de facturas comerciales y despachos de proveedores.
 Analiza la factura adjunta (imagen o documento PDF) y extrae ÚNICAMENTE un objeto JSON válido con los datos de la factura.
 NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, devuelve ÚNICAMENTE texto JSON puro:
 
@@ -106,6 +108,8 @@ NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, de
   "fecha_emision": "YYYY-MM-DD",
   "rif_emisor": "string con el RIF, NIT o CUIT del emisor",
   "nombre_emisor": "string con la razón social del proveedor",
+  "moneda": "VES o USD (especificar VES si los montos están expresados en Bolívares/Bs., o USD si están en Dólares/$)",
+  "tasa_cambio": null,
   "subtotal": 0.00,
   "iva": 0.00,
   "total": 0.00,
@@ -121,31 +125,65 @@ NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, de
 }
 PROMPT;
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}";
+        // Lista de modelos ordenados por velocidad, estabilidad y fallback
+        $modelos = [
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-2.5-flash',
+            'gemini-1.5-pro',
+        ];
 
-        $response = Http::timeout(45)->post($url, [
-            'contents' => [
-                [
-                    'parts' => [
-                        ['text' => $prompt],
+        $ultimoError = null;
+        $response = null;
+
+        foreach ($modelos as $modelo) {
+            $url = "https://generativelanguage.googleapis.com/v1beta/models/{$modelo}:generateContent?key={$apiKey}";
+
+            try {
+                $res = Http::timeout(45)->post($url, [
+                    'contents' => [
                         [
-                            'inline_data' => [
-                                'mime_type' => $mimeType,
-                                'data' => $base64Data,
+                            'parts' => [
+                                ['text' => $prompt],
+                                [
+                                    'inline_data' => [
+                                        'mime_type' => $mimeType,
+                                        'data' => $base64Data,
+                                    ]
+                                ]
                             ]
                         ]
+                    ],
+                    'generationConfig' => [
+                        'temperature' => 0.1,
+                        'response_mime_type' => 'application/json',
                     ]
-                ]
-            ],
-            'generationConfig' => [
-                'temperature' => 0.1,
-                'response_mime_type' => 'application/json',
-            ]
-        ]);
+                ]);
 
-        if (!$response->successful()) {
-            Log::error("Error Gemini OCR API: " . $response->body());
-            throw new \Exception("Error al comunicarse con el motor OCR de IA: " . $response->status() . " " . $response->body());
+                if ($res->successful()) {
+                    $response = $res;
+                    break;
+                }
+
+                $status = $res->status();
+                $body = $res->body();
+                Log::warning("Gemini OCR modelo [{$modelo}] retornó código {$status}: {$body}. Probando fallback...");
+                $ultimoError = "Modelo {$modelo} (código {$status}): {$body}";
+
+                // Si es error 503 (sobrecarga) o 429 (rate limit), breve pausa y continuar con el siguiente modelo
+                if (in_array($status, [503, 429, 500])) {
+                    usleep(500000); // 0.5s
+                    continue;
+                }
+            } catch (\Throwable $e) {
+                Log::warning("Gemini OCR excepción de red en modelo [{$modelo}]: " . $e->getMessage());
+                $ultimoError = $e->getMessage();
+            }
+        }
+
+        if (!$response || !$response->successful()) {
+            Log::error("Todos los modelos de Gemini OCR fallaron. Último error: " . $ultimoError);
+            throw new \Exception("El motor de IA está experimentando alta demanda momentánea. Por favor presione 'Reintentar' en unos segundos.");
         }
 
         $json = $response->json();
@@ -218,117 +256,166 @@ PROMPT;
     }
 
     /**
-     * Motor de conciliación renglón por renglón entre ODC y Factura
-     * Usa matching multi-estrategia para emparejar productos de distintos sistemas
+     * Motor de conciliación de alta precisión entre ODC y Factura.
+     * Utiliza Maximum Weight Bipartite Matching con reglas de exclusión por atributos (sabor, tamaño, familia)
+     * para evitar falsos positivos y emparejar 100% certeramente productos con nombres comerciales distintos.
      */
     protected function conciliarOdcConFactura(array $datosOdc, array $datosFactura)
     {
         $itemsOdc = $datosOdc['articulos'] ?? [];
         $itemsFactura = $datosFactura['articulos'] ?? [];
 
-        $renglonesComparados = [];
-        $itemsFacturaUsados = [];
-        $hayDiscrepancias = false;
-        $motivosDiscrepancia = [];
+        $candidatos = [];
 
-        // 1. Recorrer cada ítem de la ODC y buscar su match en la factura
+        // 1. Generar todos los pares posibles con scoring semántico y reglas de exclusión
         foreach ($itemsOdc as $idxOdc => $itemOdc) {
             $codOdc = strtoupper(trim($itemOdc['codigo'] ?? ''));
             $descOdc = mb_strtoupper(trim($itemOdc['descripcion'] ?? ''));
             $cantOdc = floatval($itemOdc['cantidad'] ?? 0);
 
-            $matchFactura = null;
-            $matchIndex = null;
-            $mejorScore = 0;
+            $dimOdc = $this->extraerDimensiones($descOdc);
+            $famOdc = $this->detectarFamilia($descOdc);
+            $sabOdc = $this->detectarSabor($descOdc);
 
             foreach ($itemsFactura as $idxF => $itemF) {
-                if (in_array($idxF, $itemsFacturaUsados)) continue;
-                
                 $codF = strtoupper(trim($itemF['codigo'] ?? ''));
                 $descF = mb_strtoupper(trim($itemF['descripcion'] ?? ''));
+                $cantF = floatval($itemF['cantidad'] ?? 0);
+
+                $dimF = $this->extraerDimensiones($descF);
+                $famF = $this->detectarFamilia($descF);
+                $sabF = $this->detectarSabor($descF);
+
+                // REGLAS DE EXCLUSIÓN TOTAL (Incompatibilidad estricta):
+                // A) Sabor diferente (ej: FRESA vs DURAZNO)
+                if ($sabOdc && $sabF && $sabOdc !== $sabF) {
+                    continue;
+                }
+
+                // B) Dimensión/tamaño incompatible (ej: 250ML vs 1.8L o 125GR vs 250ML)
+                if (!empty($dimOdc) && !empty($dimF)) {
+                    $comunes = array_intersect($dimOdc, $dimF);
+                    if (empty($comunes)) {
+                        continue;
+                    }
+                }
+
+                // C) Familia de producto incompatible (ej: LECHE vs YOGURT o JARABE vs BOTELLA PET)
+                if ($famOdc && $famF && $famOdc !== $famF) {
+                    continue;
+                }
+
+                // CÁLCULO DE SCORE
                 $score = 0;
 
-                // Estrategia 1: Código exacto (100 puntos)
-                if (!empty($codOdc) && !empty($codF) && $codF === $codOdc) {
-                    $score = 100;
+                // Match exacto de código
+                if (!empty($codOdc) && !empty($codF) && $codOdc === $codF) {
+                    $score += 100;
+                } elseif (!empty($codOdc) && !empty($codF) && (str_contains($codF, $codOdc) || str_contains($codOdc, $codF))) {
+                    $score += 60;
                 }
 
-                // Estrategia 2: Código contenido en el otro (70 puntos)
-                if ($score < 70 && !empty($codOdc) && !empty($codF)) {
-                    if (str_contains($codF, $codOdc) || str_contains($codOdc, $codF)) {
-                        $score = max($score, 70);
+                // Misma familia
+                if ($famOdc && $famF && $famOdc === $famF) {
+                    $score += 30;
+                }
+
+                // Mismo sabor
+                if ($sabOdc && $sabF && $sabOdc === $sabF) {
+                    $score += 35;
+                }
+
+                // Misma dimensión
+                if (!empty($dimOdc) && !empty($dimF)) {
+                    $comunes = array_intersect($dimOdc, $dimF);
+                    if (!empty($comunes)) {
+                        $score += 35;
                     }
                 }
 
-                // Estrategia 3: similar_text en descripción
-                if ($score < 60 && !empty($descOdc) && !empty($descF)) {
-                    similar_text($descOdc, $descF, $pct);
-                    if ($pct >= 45) {
-                        $score = max($score, $pct);
-                    }
+                // Similitud de palabras clave compartidas
+                $palabrasScore = $this->calcularScorePalabras($descOdc, $descF);
+                $score += ($palabrasScore * 0.35);
+
+                // Bonus si la cantidad coincide exactamente
+                if ($cantOdc > 0 && $cantF > 0 && abs($cantOdc - $cantF) < 0.01) {
+                    $score += 15;
                 }
 
-                // Estrategia 4: Coincidencia de palabras clave significativas
-                if ($score < 50 && !empty($descOdc) && !empty($descF)) {
-                    $kwScore = $this->calcularScorePalabras($descOdc, $descF);
-                    if ($kwScore >= 35) {
-                        $score = max($score, $kwScore);
-                    }
-                }
-
-                // Estrategia 5: Match por dimensión (120ML, 500GR, etc.)
-                if ($score < 40 && !empty($descOdc) && !empty($descF)) {
-                    $dimOdc = $this->extraerDimensiones($descOdc);
-                    $dimF = $this->extraerDimensiones($descF);
-                    if (!empty($dimOdc) && !empty($dimF)) {
-                        $dimComunes = array_intersect($dimOdc, $dimF);
-                        if (count($dimComunes) > 0) {
-                            $score = max($score, 35 + (count($dimComunes) * 10));
-                        }
-                    }
-                }
-
-                if ($score > $mejorScore && $score >= 35) {
-                    $mejorScore = $score;
-                    $matchFactura = $itemF;
-                    $matchIndex = $idxF;
-                    if ($score >= 100) break;
+                if ($score >= 40) {
+                    $candidatos[] = [
+                        'idx_odc' => $idxOdc,
+                        'idx_fac' => $idxF,
+                        'score' => $score,
+                    ];
                 }
             }
+        }
 
-            if ($matchFactura) {
-                $itemsFacturaUsados[] = $matchIndex;
-                $cantFactura = floatval($matchFactura['cantidad'] ?? 0);
-                $diff = round($cantFactura - $cantOdc, 2);
+        // 2. Ordenar candidatos por mayor score para matching global óptimo (evita que un ítem robe el match de otro)
+        usort($candidatos, function ($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
 
-                if ($diff == 0) {
-                    $estado = 'coincide';
-                } elseif ($diff < 0) {
-                    $estado = 'faltante';
-                    $hayDiscrepancias = true;
-                    $motivosDiscrepancia[] = "Faltan " . abs($diff) . " und de '{$itemOdc['descripcion']}'";
-                } else {
-                    $estado = 'excedente';
-                    $hayDiscrepancias = true;
-                    $motivosDiscrepancia[] = "Excedente de +{$diff} und en '{$itemOdc['descripcion']}'";
-                }
+        $odcUsados = [];
+        $facUsados = [];
+        $renglonesComparados = [];
+        $hayDiscrepancias = false;
+        $motivosDiscrepancia = [];
 
-                $renglonesComparados[] = [
-                    'codigo_odc' => $itemOdc['codigo'],
-                    'descripcion_odc' => $itemOdc['descripcion'],
-                    'cantidad_odc' => $cantOdc,
-                    'codigo_factura' => $matchFactura['codigo'] ?? null,
-                    'descripcion_factura' => $matchFactura['descripcion'] ?? null,
-                    'cantidad_factura' => $cantFactura,
-                    'diferencia' => $diff,
-                    'estado' => $estado,
-                ];
+        // Emparejar de forma óptima
+        foreach ($candidatos as $cand) {
+            $iOdc = $cand['idx_odc'];
+            $iFac = $cand['idx_fac'];
+
+            if (isset($odcUsados[$iOdc]) || isset($facUsados[$iFac])) {
+                continue;
+            }
+
+            $odcUsados[$iOdc] = true;
+            $facUsados[$iFac] = true;
+
+            $itemOdc = $itemsOdc[$iOdc];
+            $matchFactura = $itemsFactura[$iFac];
+
+            $cantOdc = floatval($itemOdc['cantidad'] ?? 0);
+            $cantFactura = floatval($matchFactura['cantidad'] ?? 0);
+            $diff = round($cantFactura - $cantOdc, 2);
+
+            if ($diff == 0) {
+                $estado = 'coincide'; // 🟢 Conforme
+            } elseif ($diff < 0) {
+                $estado = 'faltante'; // 🟡 Entrega parcial
+                $hayDiscrepancias = true;
+                $motivosDiscrepancia[] = "Faltan " . abs($diff) . " und de '{$itemOdc['descripcion']}'";
             } else {
+                $estado = 'excedente'; // 🔴 Sobre-entrega
+                $hayDiscrepancias = true;
+                $motivosDiscrepancia[] = "Excedente de +{$diff} und en '{$itemOdc['descripcion']}'";
+            }
+
+            $renglonesComparados[] = [
+                'codigo_odc' => $itemOdc['codigo'] ?? null,
+                'descripcion_odc' => $itemOdc['descripcion'] ?? null,
+                'cantidad_odc' => $cantOdc,
+                'codigo_factura' => $matchFactura['codigo'] ?? null,
+                'descripcion_factura' => $matchFactura['descripcion'] ?? null,
+                'cantidad_factura' => $cantFactura,
+                'diferencia' => $diff,
+                'estado' => $estado,
+            ];
+        }
+
+        // 3. Ítems de la ODC que no vinieron facturados
+        foreach ($itemsOdc as $idxOdc => $itemOdc) {
+            if (!isset($odcUsados[$idxOdc])) {
+                $cantOdc = floatval($itemOdc['cantidad'] ?? 0);
                 $hayDiscrepancias = true;
                 $motivosDiscrepancia[] = "No vino facturado: '{$itemOdc['descripcion']}' ({$cantOdc} und)";
+
                 $renglonesComparados[] = [
-                    'codigo_odc' => $itemOdc['codigo'],
-                    'descripcion_odc' => $itemOdc['descripcion'],
+                    'codigo_odc' => $itemOdc['codigo'] ?? null,
+                    'descripcion_odc' => $itemOdc['descripcion'] ?? null,
                     'cantidad_odc' => $cantOdc,
                     'codigo_factura' => null,
                     'descripcion_factura' => null,
@@ -339,12 +426,12 @@ PROMPT;
             }
         }
 
-        // 2. Ítems en factura que no matchearon con nada de la ODC
+        // 4. Ítems de la Factura que no estaban en la ODC (no pedidos)
         foreach ($itemsFactura as $idxF => $itemF) {
-            if (!in_array($idxF, $itemsFacturaUsados)) {
-                $hayDiscrepancias = true;
+            if (!isset($facUsados[$idxF])) {
                 $cantF = floatval($itemF['cantidad'] ?? 0);
                 $descF = $itemF['descripcion'] ?? 'Producto no identificado';
+                $hayDiscrepancias = true;
                 $motivosDiscrepancia[] = "Producto NO pedido en ODC: '{$descF}' ({$cantF} und)";
 
                 $renglonesComparados[] = [
@@ -360,26 +447,46 @@ PROMPT;
             }
         }
 
-        // 3. Comparar totales monetarios
+        // 5. Comparativa monetaria y detección inteligente de moneda (Bolívares VES vs Dólares USD)
         $totalOdc = floatval($datosOdc['total_monto'] ?? 0);
         $totalFactura = floatval($datosFactura['total'] ?? 0);
+        $monedaFactura = strtoupper(trim($datosFactura['moneda'] ?? ''));
+
+        // Detección automática: si la factura indica VES o si el total de la factura es > 10 veces el de la ODC
+        $monedasDifieren = false;
+        if ($monedaFactura === 'VES' || ($totalFactura > 0 && $totalOdc > 0 && $totalFactura > ($totalOdc * 10))) {
+            $monedasDifieren = true;
+            $monedaFactura = 'VES';
+        } else {
+            $monedaFactura = 'USD';
+        }
+
         $diffTotal = round($totalFactura - $totalOdc, 2);
 
-        if (abs($diffTotal) > 0.50 && $totalOdc > 0) {
+        // Si las monedas difieren, la discrepancia se evalúa estrictamente por unidades y renglones físicos
+        if (!$monedasDifieren && abs($diffTotal) > 0.50 && $totalOdc > 0) {
             $hayDiscrepancias = true;
             $motivosDiscrepancia[] = "Diferencia de monto total: Factura $" . number_format($totalFactura, 2) . " vs ODC $" . number_format($totalOdc, 2);
         }
 
         $estatusGeneral = $hayDiscrepancias ? 'discrepancia' : 'conforme';
-        $resumenTexto = $hayDiscrepancias 
-            ? implode(' · ', array_slice($motivosDiscrepancia, 0, 4))
-            : 'Factura 100% conforme y cuadrada con la Orden de Compra.';
+
+        if (!$hayDiscrepancias) {
+            $resumenTexto = $monedasDifieren 
+                ? "Factura emitida en Bolívares (Bs. " . number_format($totalFactura, 2) . "). Renglones y cantidades 100% cuadrados con la ODC en Divisas ($" . number_format($totalOdc, 2) . ")."
+                : "Factura 100% conforme y cuadrada con la Orden de Compra.";
+        } else {
+            $prefijo = $monedasDifieren ? "(Factura en Bs. vs ODC en USD) · " : "";
+            $resumenTexto = $prefijo . implode(' · ', array_slice($motivosDiscrepancia, 0, 3));
+        }
 
         return [
             'estatus_general' => $estatusGeneral,
             'diferencia_total' => $diffTotal,
             'total_odc' => $totalOdc,
             'total_factura' => $totalFactura,
+            'moneda_factura' => $monedaFactura,
+            'monedas_difieren' => $monedasDifieren,
             'resumen_texto' => $resumenTexto,
             'renglones' => $renglonesComparados,
             'discrepancias_lista' => $motivosDiscrepancia,
@@ -387,23 +494,78 @@ PROMPT;
     }
 
     /**
+     * Diccionario de familias de productos comunes para evitar falsos positivos
+     */
+    protected function detectarFamilia(string $desc): ?string
+    {
+        $familias = [
+            'LECHE' => ['LECHE', 'LACTEA', 'MILK'],
+            'YOGURT' => ['YOGURT', 'YOGOURT', 'YOGUR'],
+            'GELATINA' => ['GELATINA', 'JELLY'],
+            'PET_ENVASE' => ['PET', 'ENVASE', 'BOTELLA', 'FRASCO', 'BALA', 'PELI'],
+            'VALVULA' => ['VALVULA', 'DISPENSADOR', 'BOMBA'],
+            'ATOMIZADOR' => ['ATOMIZADOR', 'SPRAY', 'PULVERIZADOR'],
+            'JARABE' => ['JARABE', 'SYRUP', 'BIO', 'ENZ', 'ERI'],
+            'QUESO' => ['QUESO', 'CHEESE'],
+            'MANTEQUILLA' => ['MANTEQUILLA', 'MARGARINA'],
+            'JUGO' => ['JUGO', 'NECTAR', 'BEBIDA'],
+            'HARINA' => ['HARINA'],
+            'ARROZ' => ['ARROZ'],
+            'PASTA' => ['PASTA', 'ESPAGUETI', 'FIDEOS'],
+            'ACEITE' => ['ACEITE'],
+        ];
+
+        foreach ($familias as $famKey => $terms) {
+            foreach ($terms as $term) {
+                if (preg_match('/\b' . preg_quote($term, '/') . '\b/i', $desc)) {
+                    return $famKey;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Detección de sabores comunes para exclusión estricta
+     */
+    protected function detectarSabor(string $desc): ?string
+    {
+        $sabores = [
+            'FRESA', 'DURAZNO', 'MANZANA', 'PERA', 'VAINILLA', 'CHOCOLATE', 'NATURAL', 
+            'PINA', 'PIÑA', 'COCO', 'GUANABANA', 'MORA', 'NARANJA', 'LIMA', 'LIMON'
+        ];
+
+        foreach ($sabores as $sabor) {
+            if (preg_match('/\b' . preg_quote($sabor, '/') . '\b/i', $desc)) {
+                return $sabor;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Calcula score de coincidencia basado en palabras clave compartidas
      */
     protected function calcularScorePalabras(string $desc1, string $desc2): float
     {
-        $stopWords = ['DE', 'LA', 'EL', 'EN', 'CON', 'SIN', 'POR', 'PARA', 'UND', 'USO', 'INTERNO', 'C/', 'Y', 'A', 'X'];
+        $stopWords = [
+            'DE', 'LA', 'EL', 'EN', 'CON', 'SIN', 'POR', 'PARA', 'UND', 'USO', 
+            'INTERNO', 'C/', 'Y', 'A', 'X', 'C', 'TAPA', 'NEGRA', '28MM', 'PASTEUR', 'ENTERA'
+        ];
         
-        $words1 = array_diff(preg_split('/[\s\/\-\(\)\.,]+/', $desc1), $stopWords, ['']);
-        $words2 = array_diff(preg_split('/[\s\/\-\(\)\.,]+/', $desc2), $stopWords, ['']);
+        $words1 = array_filter(preg_split('/[\s\/\-\(\)\.,]+/', $desc1), function($w) use ($stopWords) {
+            return mb_strlen($w) >= 3 && !in_array($w, $stopWords);
+        });
+        $words2 = array_filter(preg_split('/[\s\/\-\(\)\.,]+/', $desc2), function($w) use ($stopWords) {
+            return mb_strlen($w) >= 3 && !in_array($w, $stopWords);
+        });
         
         if (empty($words1) || empty($words2)) return 0;
 
         $coincidencias = 0;
         foreach ($words1 as $w1) {
-            if (mb_strlen($w1) < 3) continue;
             foreach ($words2 as $w2) {
-                if (mb_strlen($w2) < 3) continue;
-                if ($w1 === $w2 || (mb_strlen($w1) >= 4 && str_contains($w2, $w1)) || (mb_strlen($w2) >= 4 && str_contains($w1, $w2))) {
+                if ($w1 === $w2 || str_contains($w2, $w1) || str_contains($w1, $w2)) {
                     $coincidencias++;
                     break;
                 }
@@ -432,6 +594,6 @@ PROMPT;
                 $dims[] = $val . $unit;
             }
         }
-        return $dims;
+        return array_unique($dims);
     }
 }

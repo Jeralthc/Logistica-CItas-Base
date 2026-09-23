@@ -7,6 +7,7 @@ ini_set('display_errors', 1);
 
 $baseDir = realpath(__DIR__ . '/..');
 
+
 // 1. Obtener la clave secreta desde .env
 $secretToken = 'SurakiSecreto2026'; // Fallback
 $envPath = $baseDir . '/.env';
