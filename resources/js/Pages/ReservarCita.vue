@@ -314,12 +314,17 @@ const cargarSlots = async () => {
     cargandoSlots.value = true;
     try {
         const isTI = (modoReserva.value === 'traslado_interno');
+        const numOc = isTI ? (numeroTrasladoManual.value || 'TI') : (numeroOrden.value || formProveedor.value?.numero_oc || '');
+        const tipoMerc = isTI ? 'traslado_interno' : (formProveedor.value?.tipo_mercancia || formProveedor.value?.categoria_sugerida || datosOrden.value?.categoria || datosOrden.value?.tipo_mercancia || '');
         const resp = await axios.get('/api/citas/slots', {
             params: { 
                 fecha: fechaSeleccionada.value, 
                 duracion: isTI ? duracionTraslado.value : duracionEstimada.value,
                 sucursal: isTI ? sucursalDestinoTraslado.value : (datosOrden.value?.sucursal_destino || '0101'),
-                tipo_operacion: isTI ? 'traslado_interno' : 'proveedor'
+                tipo_operacion: isTI ? 'traslado_interno' : 'proveedor',
+                numero_oc: numOc,
+                tipo_mercancia: tipoMerc,
+                cita_id: isReprogramar.value ? reprogramarCitaId.value : null
             }
         });
         slotsDisponibles.value = resp.data.slots;
@@ -377,6 +382,7 @@ const reservar = async () => {
             muelle_asignado: muelleSeleccionado.value,
             duracion_minutos: duracionEstimada.value,
             observaciones: observaciones.value,
+            tipo_mercancia: datosOrden.value?.categoria || datosOrden.value?.categoria_sugerida || datosOrden.value?.tipo_mercancia || ''
         });
 
         citaConfirmada.value = resp.data.cita;
@@ -555,7 +561,9 @@ const cargarSlotsReprogramacion = async (cita) => {
                 duracion: cita.duracion_minutos || 60,
                 sucursal: cita.muelle_asignado ? cita.muelle_asignado.substring(0, 4) : '0101',
                 tipo_operacion: isTI ? 'traslado_interno' : 'proveedor',
-                cita_id: cita.id
+                cita_id: cita.id,
+                numero_oc: cita.numero_oc,
+                tipo_mercancia: cita.tipo_mercancia
             }
         });
         repSlotsDisponibles.value = resp.data.slots;

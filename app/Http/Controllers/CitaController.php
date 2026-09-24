@@ -25,7 +25,6 @@ class CitaController extends Controller
     {
         $grupos = [
             'hiper' => ['0101', '0102'],
-            'perecederos' => ['0140', '0141', '0150'],
             'andinka' => ['0160', '0161'],
         ];
 
@@ -36,6 +35,60 @@ class CitaController extends Controller
         }
 
         return [$muelle];
+    }
+
+    /**
+     * Determina si una cita, ODC o solicitud corresponde al depósito de Perecederos (Cavas/Carnes/Charcutería/Lácteos).
+     * Los perecederos tienen su propio depósito aparte y no le quitan horas a Unai y Juan (Recepción General).
+     */
+    public static function esPerecederosCita($citaOArray): bool
+    {
+        $muelle = is_array($citaOArray) ? ($citaOArray['muelle_asignado'] ?? $citaOArray['sucursal'] ?? '') : ($citaOArray->muelle_asignado ?? $citaOArray->sucursal ?? '');
+        $muelle = trim((string)$muelle);
+        
+        if (!empty($muelle)) {
+            if (str_starts_with($muelle, '014') || str_starts_with($muelle, '015')) {
+                return true;
+            }
+        }
+
+        $tipo = is_array($citaOArray) ? ($citaOArray['tipo_mercancia'] ?? $citaOArray['categoria_sugerida'] ?? '') : ($citaOArray->tipo_mercancia ?? '');
+        $tipo = mb_strtolower(trim((string)$tipo));
+        if (!empty($tipo)) {
+            $keywords = ['pereceder', 'charcuter', 'carne', 'pescad', 'congelad', 'lacteo', 'embutid', 'pollo', 'avicol'];
+            foreach ($keywords as $kw) {
+                if (str_contains($tipo, $kw)) {
+                    return true;
+                }
+            }
+        }
+
+        $numOc = is_array($citaOArray) ? ($citaOArray['numero_oc'] ?? '') : ($citaOArray->numero_oc ?? '');
+        if (!empty($numOc)) {
+            $ordenLimpia = preg_replace('/[^0-9]/', '', $numOc);
+            $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
+            $sync = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$numOc, $ordenLimpia, $ordenPad, 'E' . $ordenPad])
+                ->select('destino', 'categoria_sugerida')
+                ->first();
+
+            if ($sync) {
+                $dest = trim((string)$sync->destino);
+                if (str_starts_with($dest, '014') || str_starts_with($dest, '015')) {
+                    return true;
+                }
+
+                $cat = mb_strtolower(trim((string)$sync->categoria_sugerida));
+                $keywords = ['pereceder', 'charcuter', 'carne', 'congelad', 'pescad', 'lacteo', 'embutid', 'pollo', 'avicol'];
+                foreach ($keywords as $kw) {
+                    if (str_contains($cat, $kw)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -70,11 +123,13 @@ class CitaController extends Controller
             ->whereDate('fecha_cita', $fecha)
             ->whereIn('estatus', ['programada', 'en muelle']);
 
+        $citaReprogramando = null;
         if ($request->filled('cita_id')) {
+            $citaReprogramando = DB::table('appointments')->where('id', $request->input('cita_id'))->first();
             $citasQuery->where('id', '!=', $request->input('cita_id'));
         }
 
-        $citasExistentes = $citasQuery->select('id', 'fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos')
+        $citasExistentes = $citasQuery->select('id', 'fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos', 'tipo_mercancia')
             ->get();
 
         // Mapeo Real de Muelles por Sucursal (Fase 6)
@@ -97,6 +152,13 @@ class CitaController extends Controller
         $carbonFecha = Carbon::parse($fecha);
         $esMiercoles = ($carbonFecha->dayOfWeek === Carbon::WEDNESDAY);
         $esSabado = ($carbonFecha->dayOfWeek === Carbon::SATURDAY);
+
+        // Determinar si la solicitud actual corresponde a Perecederos (depósito aparte)
+        $solicitudEsPerecederos = self::esPerecederosCita([
+            'sucursal' => $sucursal ?: ($citaReprogramando->muelle_asignado ?? null),
+            'numero_oc' => $request->input('numero_oc', $citaReprogramando->numero_oc ?? null),
+            'tipo_mercancia' => $request->input('tipo_mercancia', $citaReprogramando->tipo_mercancia ?? null),
+        ]);
 
         $slots = [];
         for ($h = $horaInicio; $h < $horaFin; $h++) {
@@ -126,25 +188,43 @@ class CitaController extends Controller
                     }
                 } else {
                     // 3. Galpones / Traslado Interno: Miércoles a partir de las 2:00 PM (14:00)
-                    // Las horas de la mañana hasta la 1:59 PM quedan bloqueadas
                     if ($esMiercoles && $h < 14) {
                         $bloqueadoPorHorario = true;
                         $motivoBloqueo = 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.';
                     }
                 }
 
-                // Ver si hay CUALQUIER cita que solape en ese slot (independientemente del muelle o producto)
-                // Regla de negocio: La recepción es compartida por el equipo de almacén (Unai y Juan). Si una hora ya está ocupada/apartada, no se puede agendar nadie más.
+                // Regla de negocio:
+                // - Recepción General (Unai y Juan): Regla estricta. Si la hora ya está ocupada por otra recepción general, no se puede agendar nadie más.
+                // - Perecederos: Es un depósito aparte con su propia cava. No le quita horas a los demás proveedores ni se ve bloqueado por ellos.
                 $citaSolapada = null;
                 foreach ($citasExistentes as $cita) {
+                    $citaEsPerecederos = self::esPerecederosCita($cita);
+
+                    // Si uno es Perecederos y el otro es General, no compiten por el mismo andén
+                    if ($solicitudEsPerecederos !== $citaEsPerecederos) {
+                        continue;
+                    }
+
                     $citaInicio = Carbon::parse($cita->fecha_cita);
                     $duracionReal = $cita->duracion_minutos ?? $duracionMinutos;
                     $citaFin = $citaInicio->copy()->addMinutes((int) $duracionReal);
 
                     // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
                     if ($slotInicio->lt($citaFin) && $slotFin->gt($citaInicio)) {
-                        $citaSolapada = $cita;
-                        break;
+                        if ($solicitudEsPerecederos) {
+                            // En Perecederos se agenda normal (conflicto solo si es el mismo muelle)
+                            $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+                            $muellesEquivSolicitud = self::getMuellesEquivalentes($sucursal);
+                            if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
+                                $citaSolapada = $cita;
+                                break;
+                            }
+                        } else {
+                            // En recepción general: regla estricta compartida
+                            $citaSolapada = $cita;
+                            break;
+                        }
                     }
                 }
 
@@ -273,19 +353,43 @@ class CitaController extends Controller
             }
         }
 
-        // Verificar que NO exista ninguna cita agendada en ese horario (capacidad global)
+        // Determinar si la cita a agendar corresponde al depósito de Perecederos
+        $tipoMercanciaInput = $request->input('tipo_mercancia') ?? ($isTrasladoInterno ? 'traslado_interno' : null);
+        $solicitudEsPerecederos = self::esPerecederosCita([
+            'muelle_asignado' => $validated['muelle_asignado'],
+            'numero_oc' => $validated['numero_oc'],
+            'tipo_mercancia' => $tipoMercanciaInput,
+        ]);
+
+        // Verificar que NO exista ninguna cita agendada en ese horario (separación de depósitos)
         $citasExistentes = DB::table('appointments')
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
 
         foreach ($citasExistentes as $cita) {
+            $citaEsPerecederos = self::esPerecederosCita($cita);
+
+            // Si uno es Perecederos y el otro es General, no compiten entre sí (depósitos independientes)
+            if ($solicitudEsPerecederos !== $citaEsPerecederos) {
+                continue;
+            }
+
             $inicioExistente = Carbon::parse($cita->fecha_cita);
-            $finExistente = $inicioExistente->copy()->addMinutes((int) $cita->duracion_minutos);
+            $duracionExistente = $cita->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                if ($solicitudEsPerecederos) {
+                    $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
+                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
+                    }
+                } else {
+                    return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                }
             }
         }
 
@@ -309,7 +413,7 @@ class CitaController extends Controller
             'estatus' => 'programada',
             'es_traslado_interno' => $isTrasladoInterno,
             'galpon_origen' => $isTrasladoInterno ? ($validated['galpon_origen'] ?? 'GALPÓN ALFONSO') : null,
-            'tipo_mercancia' => $isTrasladoInterno ? 'traslado_interno' : null,
+            'tipo_mercancia' => $tipoMercanciaInput,
             'user_id' => auth('web')->id() ?? 1,
             'observaciones' => $validated['observaciones'] ?? null,
             'created_at' => now(),
@@ -467,7 +571,14 @@ class CitaController extends Controller
             }
         }
 
-        // Verificar que el horario esté libre globalmente, excluyendo la cita actual
+        // Determinar si la cita que se reprograma corresponde al depósito de Perecederos
+        $solicitudEsPerecederos = self::esPerecederosCita([
+            'muelle_asignado' => $validated['muelle_asignado'],
+            'numero_oc' => $cita->numero_oc,
+            'tipo_mercancia' => $cita->tipo_mercancia,
+        ]);
+
+        // Verificar que el horario esté libre, respetando la separación de depósitos
         $citasExistentes = DB::table('appointments')
             ->where('id', '!=', $id)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
@@ -475,12 +586,28 @@ class CitaController extends Controller
             ->get();
 
         foreach ($citasExistentes as $c) {
+            $cEsPerecederos = self::esPerecederosCita($c);
+
+            // Depósitos separados: Perecederos vs General no compiten entre sí
+            if ($solicitudEsPerecederos !== $cEsPerecederos) {
+                continue;
+            }
+
             $inicioExistente = Carbon::parse($c->fecha_cita);
-            $finExistente = $inicioExistente->copy()->addMinutes((int) $c->duracion_minutos);
+            $duracionExistente = $c->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
             // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                if ($solicitudEsPerecederos) {
+                    $muellesEquivCita = self::getMuellesEquivalentes($c->muelle_asignado);
+                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
+                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})."], 422);
+                    }
+                } else {
+                    return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                }
             }
         }
 
@@ -1983,18 +2110,42 @@ class CitaController extends Controller
             return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
         }
 
-        // Verificar disponibilidad global de horario (independientemente del muelle o producto)
+        // Determinar si la solicitud del proveedor corresponde a Perecederos (depósito aparte)
+        $solicitudEsPerecederos = self::esPerecederosCita([
+            'muelle_asignado' => $validated['muelle_asignado'],
+            'numero_oc' => $validated['numero_oc'],
+            'tipo_mercancia' => $tipoMercancia,
+            'categoria_sugerida' => $validated['categoria_sugerida'] ?? null,
+        ]);
+
+        // Verificar disponibilidad de horario respetando la separación de depósitos
         $citasExistentes = DB::table('appointments')
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
             ->whereIn('estatus', ['programada', 'en muelle'])
             ->get();
 
         foreach ($citasExistentes as $cita) {
+            $citaEsPerecederos = self::esPerecederosCita($cita);
+
+            // Depósitos separados: Perecederos vs General no compiten entre sí
+            if ($solicitudEsPerecederos !== $citaEsPerecederos) {
+                continue;
+            }
+
             $inicioExistente = Carbon::parse($cita->fecha_cita);
-            $finExistente = $inicioExistente->copy()->addMinutes((int) $cita->duracion_minutos);
+            $duracionExistente = $cita->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
-                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                if ($solicitudEsPerecederos) {
+                    $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
+                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
+                    }
+                } else {
+                    return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
+                }
             }
         }
 
