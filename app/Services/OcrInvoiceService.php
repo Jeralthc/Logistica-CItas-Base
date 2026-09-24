@@ -82,18 +82,17 @@ class OcrInvoiceService
         ];
     }
 
-   /**
+    /**
      * Extrae información estructurada de la factura usando Google Gemini Vision
      * Incluye fallback automático entre modelos (gemini-2.0-flash, gemini-1.5-flash, gemini-2.5-flash, gemini-1.5-pro)
      * para tolerancia total a fallos 503 (sobrecarga temporal) y 429 (límite de cuota).
      */
     protected function extraerDatosConGemini($contenidoArchivo, string $mimeType)
     {
-        // CORRECCIÓN AQUÍ: Lee estrictamente de la configuración sin fallbacks quemados
-        $apiKey = config('services.gemini.key');
+        $apiKey = config('services.gemini.key') ?: env('GEMINI_API_KEY');
 
-        if (empty($apiKey)) {
-            throw new \Exception("No se ha configurado la clave de API de Gemini. Verifique el archivo .env (GEMINI_API_KEY).");
+        if (!$apiKey) {
+            throw new \Exception("No se ha configurado la clave de API de Gemini (GEMINI_API_KEY). Por favor ingrésela en el archivo .env o en el panel de despliegue seguro.");
         }
 
         $base64Data = base64_encode($contenidoArchivo);
@@ -125,12 +124,12 @@ NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, de
 }
 PROMPT;
 
-        // Lista de modelos ordenados por velocidad, estabilidad y fallback
+        // Lista de modelos ordenados por compatibilidad y fallback
         $modelos = [
+            'gemini-2.5-flash',
+            'gemini-3.6-flash',
             'gemini-2.0-flash',
             'gemini-1.5-flash',
-            'gemini-2.5-flash',
-            'gemini-1.5-pro',
         ];
 
         $ultimoError = null;
@@ -183,7 +182,10 @@ PROMPT;
 
         if (!$response || !$response->successful()) {
             Log::error("Todos los modelos de Gemini OCR fallaron. Último error: " . $ultimoError);
-            throw new \Exception("El motor de IA está experimentando alta demanda momentánea. Por favor presione 'Reintentar' en unos segundos.");
+            if (str_contains($ultimoError, 'leaked') || str_contains($ultimoError, 'API key was reported as leaked')) {
+                throw new \Exception("Google ha revocado la clave de API (reportada como filtrada). Ingrese una nueva GEMINI_API_KEY en .env o en el panel de despliegue seguro (https://aistudio.google.com/app/apikey).");
+            }
+            throw new \Exception("Error en motor OCR de IA: " . ($ultimoError ?: 'Google no respondió.'));
         }
 
         $json = $response->json();
@@ -201,6 +203,7 @@ PROMPT;
         $datosDecodificados['raw_text'] = $textoLimpio;
         return $datosDecodificados;
     }
+
     /**
      * Obtiene los artículos y montos de la ODC desde erp_ordenes_sync
      */
