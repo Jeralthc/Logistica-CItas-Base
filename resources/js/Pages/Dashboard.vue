@@ -406,7 +406,7 @@ const getIconoOcr = (estatus) => {
 
 const getTextoOcr = (estatus) => {
     if (estatus === 'conforme') return 'Factura Conciliada (OK)';
-    if (estatus === 'discrepancia') return 'Discrepancia con ODC';
+    if (estatus === 'discrepancia') return 'Diferencia con ODC';
     return 'Analizar con OCR';
 };
 
@@ -1999,7 +1999,7 @@ const getSucursalNombre = (codigo) => {
                             <div class="flex items-center gap-2">
                                 <span class="text-lg">{{ resultadoOcr.estatus_conciliacion === 'conforme' ? '🟢' : '⚠️' }}</span>
                                 <span class="text-sm font-black uppercase tracking-wide">
-                                    {{ resultadoOcr.estatus_conciliacion === 'conforme' ? 'Factura 100% Conforme y Cuadrada' : 'Discrepancia Detectada entre Factura y ODC' }}
+                                    {{ resultadoOcr.estatus_conciliacion === 'conforme' ? 'Factura 100% Conforme y Cuadrada' : 'Diferencia Detectada entre Factura y ODC' }}
                                 </span>
                             </div>
                             <p class="text-xs font-medium opacity-90">{{ resultadoOcr.resumen_discrepancias }}</p>
