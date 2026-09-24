@@ -124,12 +124,13 @@ NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, de
 }
 PROMPT;
 
-        // Lista de modelos ordenados por compatibilidad y fallback
+        // Lista de modelos ordenados por compatibilidad y disponibilidad real en Google API
         $modelos = [
-            'gemini-2.5-flash',
             'gemini-3.6-flash',
-            'gemini-2.0-flash',
-            'gemini-1.5-flash',
+            'gemini-3.5-flash',
+            'gemini-3.5-flash-lite',
+            'gemini-3.7-flash',
+            'gemini-flash-latest',
         ];
 
         $ultimoError = null;
@@ -171,7 +172,7 @@ PROMPT;
 
                 // Si es error 503 (sobrecarga) o 429 (rate limit), breve pausa y continuar con el siguiente modelo
                 if (in_array($status, [503, 429, 500])) {
-                    usleep(500000); // 0.5s
+                    usleep(600000); // 0.6s
                     continue;
                 }
             } catch (\Throwable $e) {
@@ -184,6 +185,9 @@ PROMPT;
             Log::error("Todos los modelos de Gemini OCR fallaron. Último error: " . $ultimoError);
             if (str_contains($ultimoError, 'leaked') || str_contains($ultimoError, 'API key was reported as leaked')) {
                 throw new \Exception("Google ha revocado la clave de API (reportada como filtrada). Ingrese una nueva GEMINI_API_KEY en .env o en el panel de despliegue seguro (https://aistudio.google.com/app/apikey).");
+            }
+            if (str_contains($ultimoError, '503') || str_contains($ultimoError, 'high demand') || str_contains($ultimoError, '429')) {
+                throw new \Exception("El motor de IA está experimentando alta demanda momentánea en los servidores de Google. Por favor presione 'Reintentar' en unos segundos.");
             }
             throw new \Exception("Error en motor OCR de IA: " . ($ultimoError ?: 'Google no respondió.'));
         }
