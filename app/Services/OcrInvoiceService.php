@@ -24,28 +24,47 @@ class OcrInvoiceService
             throw new \Exception("La cita #{$appointmentId} no tiene una factura adjunta para analizar.");
         }
 
-        // Obtener ruta física del archivo (si son múltiples, tomar la primera para análisis o el archivo principal)
-        $pathRelativo = trim($cita->factura_path);
-        if (str_starts_with($pathRelativo, '[')) {
-            $decoded = json_decode($pathRelativo, true);
-            $pathRelativo = $decoded[0] ?? $pathRelativo;
+        // Obtener ruta(s) física(s) de los archivos de factura (soporte para 1 o múltiples facturas)
+        $rawPath = trim($cita->factura_path);
+        $archivosFacturas = [];
+        if (str_starts_with($rawPath, '[')) {
+            $decoded = json_decode($rawPath, true);
+            if (is_array($decoded)) {
+                $archivosFacturas = $decoded;
+            }
         }
+        if (empty($archivosFacturas)) {
+            $archivosFacturas = [$rawPath];
+        }
+
         $disco = Storage::disk('public');
+        $facturasExtraidas = [];
 
-        if (!$disco->exists($pathRelativo)) {
-            throw new \Exception("El archivo de la factura no existe en el almacenamiento: {$pathRelativo}");
+        foreach ($archivosFacturas as $pathRelativo) {
+            $pathRelativo = trim($pathRelativo);
+            if (!$disco->exists($pathRelativo)) {
+                Log::warning("OcrInvoiceService: Archivo de factura no encontrado en disco: {$pathRelativo}");
+                continue;
+            }
+
+            $contenidoArchivo = $disco->get($pathRelativo);
+            $mimeType = $disco->mimeType($pathRelativo) ?: 'application/pdf';
+
+            // Extraer datos de cada factura individual con Gemini Vision
+            $facturasExtraidas[] = $this->extraerDatosConGemini($contenidoArchivo, $mimeType);
         }
 
-        $contenidoArchivo = $disco->get($pathRelativo);
-        $mimeType = $disco->mimeType($pathRelativo) ?: 'application/pdf';
+        if (empty($facturasExtraidas)) {
+            throw new \Exception("Ninguno de los archivos de factura adjuntos existe en el almacenamiento del servidor.");
+        }
 
-        // 1. Extraer datos de la factura con Gemini Vision
-        $datosFactura = $this->extraerDatosConGemini($contenidoArchivo, $mimeType);
+        // Consolidar datos de todas las facturas analizadas (subtotales, IVA, totales y renglones agrupados)
+        $datosFactura = $this->consolidarMultiplesFacturas($facturasExtraidas);
 
         // 2. Obtener datos de la Orden de Compra desde erp_ordenes_sync
         $datosOdc = $this->obtenerArticulosOdc($cita->numero_oc);
 
-        // 3. Ejecutar motor de conciliación ODC vs Factura
+        // 3. Ejecutar motor de conciliación ODC vs Factura (o lote consolidado)
         $conciliacion = $this->conciliarOdcConFactura($datosOdc, $datosFactura);
 
         // 4. Guardar o actualizar resultado en invoice_ocr_analyses
@@ -117,6 +136,7 @@ NO agregues explicaciones, NO agregues formato markdown como ```json ... ```, de
       "codigo": "string con código de producto o null",
       "descripcion": "descripción clara del producto",
       "cantidad": 0.00,
+      "unidad_medida": "string con la unidad de medida si aparece en la factura (ej: caj, caja, bto, bulto, fdo, fardo, und, pza, kg) o null",
       "precio_unitario": 0.00,
       "total_renglon": 0.00
     }
@@ -209,6 +229,97 @@ PROMPT;
     }
 
     /**
+     * Consolida múltiples facturas en un solo payload estructurado
+     */
+    protected function consolidarMultiplesFacturas(array $facturasExtraidas): array
+    {
+        if (count($facturasExtraidas) === 1) {
+            return $facturasExtraidas[0];
+        }
+
+        $consolidado = [
+            'numero_factura' => '',
+            'fecha_emision' => '',
+            'rif_emisor' => '',
+            'nombre_emisor' => '',
+            'moneda' => 'USD',
+            'subtotal' => 0.00,
+            'iva' => 0.00,
+            'total' => 0.00,
+            'articulos' => [],
+            'facturas_individuales' => [],
+            'raw_text' => ''
+        ];
+
+        $numerosFactura = [];
+        $monedas = [];
+
+        foreach ($facturasExtraidas as $idx => $fac) {
+            $num = trim($fac['numero_factura'] ?? ('Factura ' . ($idx + 1)));
+            if ($num && !in_array($num, $numerosFactura)) {
+                $numerosFactura[] = $num;
+            }
+
+            if (empty($consolidado['fecha_emision']) && !empty($fac['fecha_emision'])) {
+                $consolidado['fecha_emision'] = $fac['fecha_emision'];
+            }
+            if (empty($consolidado['rif_emisor']) && !empty($fac['rif_emisor'])) {
+                $consolidado['rif_emisor'] = $fac['rif_emisor'];
+            }
+            if (empty($consolidado['nombre_emisor']) && !empty($fac['nombre_emisor'])) {
+                $consolidado['nombre_emisor'] = $fac['nombre_emisor'];
+            }
+
+            $monedaFac = strtoupper(trim($fac['moneda'] ?? 'USD'));
+            $monedas[] = $monedaFac;
+
+            $consolidado['subtotal'] += floatval($fac['subtotal'] ?? 0);
+            $consolidado['iva'] += floatval($fac['iva'] ?? 0);
+            $consolidado['total'] += floatval($fac['total'] ?? 0);
+
+            // Agregar artículos etiquetando su factura de origen
+            foreach (($fac['articulos'] ?? []) as $art) {
+                $art['factura_origen'] = $num;
+                $consolidado['articulos'][] = $art;
+            }
+
+            $consolidado['facturas_individuales'][] = [
+                'numero' => $num,
+                'total' => floatval($fac['total'] ?? 0),
+                'items_count' => count($fac['articulos'] ?? [])
+            ];
+        }
+
+        // Agrupar artículos idénticos entre facturas si provienen del mismo código/descripción
+        $articulosAgrupados = [];
+        foreach ($consolidado['articulos'] as $art) {
+            $key = strtoupper(trim(($art['codigo'] ?? '') ?: ($art['descripcion'] ?? '')));
+            if (!$key) {
+                $articulosAgrupados[] = $art;
+                continue;
+            }
+            if (!isset($articulosAgrupados[$key])) {
+                $articulosAgrupados[$key] = $art;
+            } else {
+                $articulosAgrupados[$key]['cantidad'] += floatval($art['cantidad'] ?? 0);
+                $articulosAgrupados[$key]['total_renglon'] += floatval($art['total_renglon'] ?? 0);
+                if (!str_contains($articulosAgrupados[$key]['factura_origen'] ?? '', $art['factura_origen'] ?? '')) {
+                    $articulosAgrupados[$key]['factura_origen'] .= ', ' . ($art['factura_origen'] ?? '');
+                }
+            }
+        }
+        $consolidado['articulos'] = array_values($articulosAgrupados);
+
+        $consolidado['numero_factura'] = implode(' / ', $numerosFactura);
+        $consolidado['moneda'] = in_array('VES', $monedas) ? 'VES' : 'USD';
+        $consolidado['subtotal'] = round($consolidado['subtotal'], 2);
+        $consolidado['iva'] = round($consolidado['iva'], 2);
+        $consolidado['total'] = round($consolidado['total'], 2);
+
+        return $consolidado;
+    }
+
+    /**
      * Obtiene los artículos y montos de la ODC desde erp_ordenes_sync
      */
     protected function obtenerArticulosOdc(string $numeroOc)
@@ -232,6 +343,8 @@ PROMPT;
 
             foreach ($detalles as $d) {
                 $cant = floatval($d['cantidad_unidades'] ?? $d['n_CANTIDAD'] ?? $d['cantidad'] ?? $d['bultos'] ?? 0);
+                $unidadesPorCaja = floatval($d['unidades_por_caja'] ?? $d['n_cantibul'] ?? $d['ns_CantidadEmpaque'] ?? 1);
+                $bultos = floatval($d['bultos'] ?? ($unidadesPorCaja > 0 ? ($cant / $unidadesPorCaja) : $cant));
                 $precio = floatval($d['costo_unitario'] ?? $d['n_PRECIO'] ?? $d['precio_unitario'] ?? $d['precio'] ?? 0);
                 $total = floatval($d['subtotal'] ?? $d['n_TOTAL'] ?? ($cant * $precio));
                 $totalMonto += $total;
@@ -245,6 +358,9 @@ PROMPT;
                     'codigo' => trim($d['codigo'] ?? $d['c_CODARTICULO'] ?? ''),
                     'descripcion' => $desc,
                     'cantidad' => $cant,
+                    'bultos' => $bultos,
+                    'unidades_por_caja' => $unidadesPorCaja > 0 ? $unidadesPorCaja : 1,
+                    'unidad_presenta' => trim($d['c_presenta'] ?? 'UND'),
                     'precio_unitario' => $precio,
                     'total' => $total,
                 ];
@@ -346,7 +462,15 @@ PROMPT;
 
                 // Bonus si la cantidad coincide exactamente
                 if ($cantOdc > 0 && $cantF > 0 && abs($cantOdc - $cantF) < 0.01) {
-                    $score += 15;
+                    $score += 20;
+                }
+                // Bonus si la cantidad en factura coincide con los BULTOS (cajas) de la ODC
+                $bultosOdc = floatval($itemOdc['bultos'] ?? 0);
+                $unidadesPorCaja = floatval($itemOdc['unidades_por_caja'] ?? 1);
+                if ($bultosOdc > 0 && $cantF > 0 && abs($bultosOdc - $cantF) < 0.01) {
+                    $score += 25;
+                } elseif ($unidadesPorCaja > 1 && $cantF > 0 && abs(($cantF * $unidadesPorCaja) - $cantOdc) < 0.01) {
+                    $score += 25;
                 }
 
                 if ($score >= 40) {
@@ -386,28 +510,91 @@ PROMPT;
             $matchFactura = $itemsFactura[$iFac];
 
             $cantOdc = floatval($itemOdc['cantidad'] ?? 0);
-            $cantFactura = floatval($matchFactura['cantidad'] ?? 0);
-            $diff = round($cantFactura - $cantOdc, 2);
+            $bultosOdc = floatval($itemOdc['bultos'] ?? 0);
+            $unidadesPorCaja = floatval($itemOdc['unidades_por_caja'] ?? 1);
+            $unidadPresenta = trim($itemOdc['unidad_presenta'] ?? 'UND');
 
-            if ($diff == 0) {
+            $cantFactura = floatval($matchFactura['cantidad'] ?? 0);
+            $unidadFactura = strtolower(trim($matchFactura['unidad_medida'] ?? ''));
+
+            $esUnidadCaja = str_contains($unidadFactura, 'caj') 
+                || str_contains($unidadFactura, 'bto') 
+                || str_contains($unidadFactura, 'bulto')
+                || str_contains($unidadFactura, 'fdo')
+                || str_contains($unidadFactura, 'fardo');
+
+            $diff = 0;
+            $estado = 'coincide';
+            $notaEquivalencia = null;
+
+            // CASO 1: Coincidencia exacta directa en unidades
+            if (abs($cantFactura - $cantOdc) < 0.01) {
+                $diff = 0;
+                $estado = 'coincide';
+                if ($bultosOdc > 0 && $unidadesPorCaja > 1 && $esUnidadCaja) {
+                    $notaEquivalencia = "{$cantFactura} " . ($cantFactura == 1 ? 'caja' : 'cajas') . " = {$cantOdc} und";
+                }
+            }
+            // CASO 2: La factura vino expresada en cajas/bultos y coincide con los bultos de la ODC (ej: Factura 1 caj == ODC 1 bulto de 20 und)
+            elseif ($bultosOdc > 0 && abs($cantFactura - $bultosOdc) < 0.01) {
+                $diff = 0;
                 $estado = 'coincide'; // 🟢 Conforme
-            } elseif ($diff < 0) {
-                $estado = 'faltante'; // 🟡 Entrega parcial
-                $hayDiscrepancias = true;
-                $motivosDiscrepancia[] = "Faltan " . abs($diff) . " und de '{$itemOdc['descripcion']}'";
-            } else {
-                $estado = 'excedente'; // 🔴 Sobre-entrega
-                $hayDiscrepancias = true;
-                $motivosDiscrepancia[] = "Excedente de +{$diff} und en '{$itemOdc['descripcion']}'";
+                $cajTexto = $cantFactura == 1 ? 'caja' : 'cajas';
+                $notaEquivalencia = "{$cantFactura} {$cajTexto} = {$cantOdc} und";
+            }
+            // CASO 3: Multiplicación de cajas por unidades_por_caja coincide con la cantidad en ODC (ej: 2 caj x 10 und/caja = 20 und)
+            elseif ($unidadesPorCaja > 1 && abs(($cantFactura * $unidadesPorCaja) - $cantOdc) < 0.01) {
+                $diff = 0;
+                $estado = 'coincide'; // 🟢 Conforme
+                $notaEquivalencia = "{$cantFactura} caj x {$unidadesPorCaja} = {$cantOdc} und";
+            }
+            // CASO 4: Facturación en cajas con diferencia real (ej: pedidas 5 cajas y facturaron 4 cajas)
+            elseif ($unidadesPorCaja > 1 && ($esUnidadCaja || ($bultosOdc > 0 && $cantFactura < $cantOdc && abs($cantFactura - $bultosOdc) > 0.01))) {
+                $cantFacturaEnUnd = $cantFactura * $unidadesPorCaja;
+                $diff = round($cantFacturaEnUnd - $cantOdc, 2);
+                $diffCajas = round($cantFactura - $bultosOdc, 2);
+
+                if ($diff < 0) {
+                    $estado = 'faltante'; // 🟡 Entrega parcial
+                    $hayDiscrepancias = true;
+                    $cajasFaltan = abs($diffCajas);
+                    $motivosDiscrepancia[] = "Faltan {$cajasFaltan} " . ($cajasFaltan == 1 ? 'caja' : 'cajas') . " (" . abs($diff) . " und) de '{$itemOdc['descripcion']}'";
+                    $notaEquivalencia = "Faltan {$cajasFaltan} caj (" . abs($diff) . " und)";
+                } else {
+                    $estado = 'excedente'; // 🔴 Sobre-entrega
+                    $hayDiscrepancias = true;
+                    $cajasExceden = abs($diffCajas);
+                    $motivosDiscrepancia[] = "Excedente de +{$cajasExceden} " . ($cajasExceden == 1 ? 'caja' : 'cajas') . " (+{$diff} und) en '{$itemOdc['descripcion']}'";
+                    $notaEquivalencia = "+{$cajasExceden} caj (+{$diff} und)";
+                }
+            }
+            // CASO 5: Comparación estándar directa de unidades
+            else {
+                $diff = round($cantFactura - $cantOdc, 2);
+                if ($diff == 0) {
+                    $estado = 'coincide'; // 🟢 Conforme
+                } elseif ($diff < 0) {
+                    $estado = 'faltante'; // 🟡 Entrega parcial
+                    $hayDiscrepancias = true;
+                    $motivosDiscrepancia[] = "Faltan " . abs($diff) . " und de '{$itemOdc['descripcion']}'";
+                } else {
+                    $estado = 'excedente'; // 🔴 Sobre-entrega
+                    $hayDiscrepancias = true;
+                    $motivosDiscrepancia[] = "Excedente de +{$diff} und en '{$itemOdc['descripcion']}'";
+                }
             }
 
             $renglonesComparados[] = [
                 'codigo_odc' => $itemOdc['codigo'] ?? null,
                 'descripcion_odc' => $itemOdc['descripcion'] ?? null,
                 'cantidad_odc' => $cantOdc,
+                'bultos_odc' => $bultosOdc,
+                'unidades_por_caja' => $unidadesPorCaja,
                 'codigo_factura' => $matchFactura['codigo'] ?? null,
                 'descripcion_factura' => $matchFactura['descripcion'] ?? null,
                 'cantidad_factura' => $cantFactura,
+                'unidad_factura' => $matchFactura['unidad_medida'] ?? null,
+                'nota_equivalencia' => $notaEquivalencia,
                 'diferencia' => $diff,
                 'estado' => $estado,
             ];

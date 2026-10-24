@@ -471,7 +471,11 @@ const ejecutarAnalisisOcr = async () => {
 
 const filtroTipoMercancia = ref('todos'); // 'todos', 'secos', 'fruver', 'perecederos'
 
-const obtenerTipoCita = (tipoMercancia) => {
+const obtenerTipoCita = (tipoMercancia, muelle = '') => {
+    const cleanMuelle = String(muelle || '').trim();
+    if (cleanMuelle === '0101' || cleanMuelle === '0102' || cleanMuelle === '0103') {
+        return 'secos';
+    }
     if (!tipoMercancia) return 'secos';
     const clean = tipoMercancia.toLowerCase();
     if (clean.includes('frutas') || clean.includes('verduras') || clean.includes('fruver')) {
@@ -488,7 +492,7 @@ const citasFiltradas = computed(() => {
         return citasProgramadas.value;
     }
     return citasProgramadas.value.filter(cita => {
-        return obtenerTipoCita(cita.tipo_mercancia) === filtroTipoMercancia.value;
+        return obtenerTipoCita(cita.tipo_mercancia, cita.muelle_asignado || cita.sucursal) === filtroTipoMercancia.value;
     });
 });
 
@@ -788,12 +792,26 @@ const formatFechaHora = (f) => {
 
 const formatRangoHora = (fechaInicio, duracionMinutos) => {
     if (!fechaInicio) return '—';
-    const durMin = Math.min(240, Math.max(30, Number(duracionMinutos) || 45));
+    const durMin = Number(duracionMinutos) || 45;
     const inicio = new Date(fechaInicio);
     const fin = new Date(inicio.getTime() + (durMin * 60000));
     const strInicio = inicio.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
     const strFin = fin.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
     return `${strInicio} - ${strFin}`;
+};
+
+const formatDuracionTexto = (duracionMinutos) => {
+    const mins = Number(duracionMinutos) || 0;
+    if (mins <= 0) return '';
+    const horas = Math.floor(mins / 60);
+    const resto = mins % 60;
+    if (horas > 0 && resto > 0) {
+        return `${horas}h ${resto}m`;
+    } else if (horas > 0) {
+        return `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+    } else {
+        return `${resto} min`;
+    }
 };
 
 const statusColor = (s) => {
@@ -1025,18 +1043,21 @@ const getSucursalNombre = (codigo) => {
                                         </span>
                                         <span v-if="cita.tipo_mercancia && !esCitaTraslado(cita)" class="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase border"
                                             :class="{
-                                                'bg-orange-50 text-orange-700 border-orange-200': obtenerTipoCita(cita.tipo_mercancia) === 'secos',
-                                                'bg-lime-50 text-lime-700 border-lime-200': obtenerTipoCita(cita.tipo_mercancia) === 'fruver',
-                                                'bg-rose-50 text-rose-700 border-rose-200': obtenerTipoCita(cita.tipo_mercancia) === 'perecederos'
+                                                'bg-orange-50 text-orange-700 border-orange-200': obtenerTipoCita(cita.tipo_mercancia, cita.muelle_asignado || cita.sucursal) === 'secos',
+                                                'bg-lime-50 text-lime-700 border-lime-200': obtenerTipoCita(cita.tipo_mercancia, cita.muelle_asignado || cita.sucursal) === 'fruver',
+                                                'bg-rose-50 text-rose-700 border-rose-200': obtenerTipoCita(cita.tipo_mercancia, cita.muelle_asignado || cita.sucursal) === 'perecederos'
                                             }">
-                                            {{ obtenerTipoCita(cita.tipo_mercancia) }}
+                                            {{ obtenerTipoCita(cita.tipo_mercancia, cita.muelle_asignado || cita.sucursal) }}
                                         </span>
                                     </div>
                                     <p class="text-sm text-slate-600 font-semibold truncate">{{ cita.proveedor }}</p>
                                     <div class="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-slate-400">
-                                        <span class="flex items-center gap-1">
-                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                        <span class="flex items-center gap-1 font-semibold text-slate-700">
+                                            <svg class="w-3.5 h-3.5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                                             {{ formatRangoHora(cita.fecha_cita, cita.duracion_minutos || 0) }}
+                                            <span v-if="cita.duracion_minutos" class="bg-blue-50 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-200">
+                                                {{ formatDuracionTexto(cita.duracion_minutos) }}
+                                            </span>
                                         </span>
                                         <span class="flex items-center gap-1">
                                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
@@ -2059,12 +2080,18 @@ const getSucursalNombre = (codigo) => {
                                             <div class="font-bold truncate" :title="r.descripcion_odc">{{ r.descripcion_odc || '(No en ODC)' }}</div>
                                             <div class="text-[10px] font-mono text-slate-400">{{ r.codigo_odc || '-' }}</div>
                                         </td>
-                                        <td class="p-3 text-center font-bold text-slate-700">{{ r.cantidad_odc }}</td>
+                                        <td class="p-3 text-center font-bold text-slate-700">
+                                            <div>{{ r.cantidad_odc }}</div>
+                                            <div v-if="r.bultos_odc && r.bultos_odc != r.cantidad_odc" class="text-[10px] text-slate-400 font-normal">({{ r.bultos_odc }} {{ r.bultos_odc == 1 ? 'caja' : 'cajas' }})</div>
+                                        </td>
                                         <td class="p-3 font-medium text-slate-800 max-w-[180px]">
                                             <div class="font-bold truncate" :title="r.descripcion_factura">{{ r.descripcion_factura || '(No en Factura)' }}</div>
                                             <div class="text-[10px] font-mono text-slate-400">{{ r.codigo_factura || '-' }}</div>
                                         </td>
-                                        <td class="p-3 text-center font-bold text-slate-700">{{ r.cantidad_factura }}</td>
+                                        <td class="p-3 text-center font-bold text-slate-700">
+                                            <div>{{ r.cantidad_factura }} <span v-if="r.unidad_factura" class="text-[10px] text-slate-500 font-semibold">{{ r.unidad_factura }}</span></div>
+                                            <div v-if="r.nota_equivalencia" class="text-[9px] text-emerald-600 font-bold whitespace-nowrap">{{ r.nota_equivalencia }}</div>
+                                        </td>
                                         <td class="p-3 text-center font-mono font-bold" :class="r.diferencia === 0 ? 'text-emerald-600' : (r.diferencia < 0 ? 'text-amber-600' : 'text-red-600')">
                                             {{ r.diferencia > 0 ? '+' : '' }}{{ r.diferencia }}
                                         </td>

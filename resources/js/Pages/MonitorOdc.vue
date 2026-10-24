@@ -239,6 +239,30 @@ const formatFechaHora = (f) => {
     return `${fecha} · ${hora}`;
 };
 
+const formatDuracionTexto = (duracionMinutos) => {
+    const mins = Number(duracionMinutos) || 0;
+    if (mins <= 0) return '';
+    const horas = Math.floor(mins / 60);
+    const resto = mins % 60;
+    if (horas > 0 && resto > 0) {
+        return `${horas}h ${resto}m`;
+    } else if (horas > 0) {
+        return `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+    } else {
+        return `${resto} min`;
+    }
+};
+
+const formatRangoHora = (fechaInicio, duracionMinutos) => {
+    if (!fechaInicio) return '—';
+    const durMin = Number(duracionMinutos) || 45;
+    const inicio = new Date(fechaInicio);
+    const fin = new Date(inicio.getTime() + (durMin * 60000));
+    const strInicio = inicio.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const strFin = fin.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${strInicio} - ${strFin}`;
+};
+
 const deshabilitarOrden = async (numero_oc) => {
     if (!confirm(`¿Estás seguro de que deseas restablecer la orden ${numero_oc} a estado pendiente? Esto eliminará su habilitación actual.`)) return;
     
@@ -336,6 +360,12 @@ onMounted(cargarOrdenes);
                             class="px-6 py-3 rounded-2xl font-bold text-sm transition-all flex items-center gap-2">
                         🍎 Fruver
                     </button>
+
+                    <Link :href="route('calendario')" 
+                          class="ms-auto px-5 py-3 rounded-2xl font-black text-sm bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white border border-blue-200 shadow-sm transition-all flex items-center gap-2"
+                          title="Ver citas agendadas y horas disponibles en el calendario">
+                        <span>📅</span> Ver Calendario & Horas Libres →
+                    </Link>
                 </div>
                 
                 <!-- Sub-Filtros de Estado de Cita (Aplica para todas las áreas) -->
@@ -489,7 +519,15 @@ onMounted(cargarOrdenes);
                                         </td>
                                         
                                         <td class="px-6 py-4 text-slate-500">{{ formatFecha(odc.fecha_emision) }}</td>
-                                        <td class="px-6 py-4 text-slate-500 font-medium">{{ formatFecha(odc.fecha_recepcion) }}</td>
+                                        <td class="px-6 py-4 text-slate-500 font-medium">
+                                            <div>{{ formatFecha(odc.fecha_recepcion) }}</div>
+                                            <div v-if="odc.fecha_cita" class="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 mt-1 inline-flex items-center gap-1 shadow-sm" title="Horario apartado por el proveedor">
+                                                <span>🕒</span> {{ formatRangoHora(odc.fecha_cita, odc.duracion_minutos) }}
+                                                <span v-if="odc.duracion_minutos" class="text-[9px] text-blue-800 font-black bg-white px-1 py-0.2 rounded border border-blue-200">
+                                                    {{ formatDuracionTexto(odc.duracion_minutos) }}
+                                                </span>
+                                            </div>
+                                        </td>
                                         
                                         <td class="px-6 py-4">
                                             <div class="space-y-1">
@@ -693,6 +731,13 @@ onMounted(cargarOrdenes);
                                                         <div v-if="odc.fecha_envio_comprador || odc.fecha_emision || odc.fecha_odc" class="flex justify-between items-center text-xs">
                                                             <span class="text-indigo-600 font-bold">📤 Envío Comprador</span>
                                                             <span class="font-bold text-indigo-900">{{ formatFechaHora(odc.fecha_envio_comprador || odc.fecha_emision || odc.fecha_odc) }}</span>
+                                                        </div>
+                                                        <div v-if="odc.fecha_cita" class="flex justify-between items-center text-xs">
+                                                            <span class="text-blue-600 font-bold">🕒 Horario Cita Apartada</span>
+                                                            <span class="font-bold text-blue-900">
+                                                                {{ formatRangoHora(odc.fecha_cita, odc.duracion_minutos) }}
+                                                                <span v-if="odc.duracion_minutos" class="text-blue-700 font-normal"> ({{ formatDuracionTexto(odc.duracion_minutos) }})</span>
+                                                            </span>
                                                         </div>
                                                         <div v-if="odc.fecha_registro_cita" class="flex justify-between items-center text-xs">
                                                             <span class="text-purple-600 font-bold">⏱️ Registro Cita</span>

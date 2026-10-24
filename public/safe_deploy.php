@@ -2,11 +2,10 @@
 // safe_deploy.php - Panel de Emergencia y Recuperación Seguro
 session_start();
 
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+error_reporting(0);
+ini_set('display_errors', 0);
 
 $baseDir = realpath(__DIR__ . '/..');
-
 
 // 1. Obtener la clave secreta desde .env
 $secretToken = 'SurakiSecreto2026'; // Fallback
@@ -21,11 +20,12 @@ if (file_exists($envPath)) {
 // 2. Manejo de autenticación
 if (isset($_POST['action']) && $_POST['action'] === 'login') {
     $pass = $_POST['password'] ?? '';
-    if ($pass === $secretToken) {
+    if (hash_equals($secretToken, (string)$pass)) {
         $_SESSION['authenticated_deploy'] = true;
         header('Location: safe_deploy.php');
         exit;
     } else {
+        usleep(500000); // Retardo defensivo de 500ms contra ataques de fuerza bruta
         $error = "Contraseña de emergencia inválida.";
     }
 }

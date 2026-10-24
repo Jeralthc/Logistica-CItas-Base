@@ -97,6 +97,7 @@ $cookieJar = new \GuzzleHttp\Cookie\CookieJar();
 
 echo "🔐 1/3 Autenticando con el servidor de producción...\n";
 $loginResp = Http::withoutVerifying()
+    ->timeout(60)
     ->withOptions(['cookies' => $cookieJar])
     ->asForm()
     ->post($url, [

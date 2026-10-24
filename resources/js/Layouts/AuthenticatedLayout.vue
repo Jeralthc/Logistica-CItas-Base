@@ -416,8 +416,8 @@ const tieneModulo = (modulo) => {
 
     // Fallback por defecto según rol
     if (user.role === 'admin') return true;
-    if (user.role === 'receptor') return ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'].includes(modulo);
-    if (user.role === 'comprador') return ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'].includes(modulo);
+    if (user.role === 'receptor') return ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'].includes(modulo);
+    if (user.role === 'comprador') return ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'].includes(modulo);
     if (user.role === 'proveedor') return ['recepcion', 'reservar_cita'].includes(modulo);
     return false;
 };
@@ -455,6 +455,13 @@ const tieneModulo = (modulo) => {
                                     :active="route().current('monitor-odc')"
                                 >
                                     Monitor ODC
+                                </NavLink>
+                                <NavLink
+                                    v-if="tieneModulo('calendario')"
+                                    :href="route('calendario')"
+                                    :active="route().current('calendario')"
+                                >
+                                    📅 Calendario
                                 </NavLink>
                                 <NavLink
                                     v-if="tieneModulo('operarios')"
@@ -725,6 +732,11 @@ const tieneModulo = (modulo) => {
                             v-if="tieneModulo('monitor_odc')"
                             :href="route('monitor-odc')" :active="route().current('monitor-odc')">
                             Monitor ODC
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink 
+                            v-if="tieneModulo('calendario')"
+                            :href="route('calendario')" :active="route().current('calendario')">
+                            📅 Calendario
                         </ResponsiveNavLink>
                         <ResponsiveNavLink 
                             v-if="tieneModulo('operarios')"

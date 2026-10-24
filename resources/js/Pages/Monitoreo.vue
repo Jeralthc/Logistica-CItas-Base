@@ -188,6 +188,34 @@ const formatFecha = (str) => {
     } catch (e) { return str; }
 };
 
+const formatDuracionTexto = (duracionMinutos) => {
+    const mins = Number(duracionMinutos) || 0;
+    if (mins <= 0) return '';
+    const horas = Math.floor(mins / 60);
+    const resto = mins % 60;
+    if (horas > 0 && resto > 0) {
+        return `${horas}h ${resto}m`;
+    } else if (horas > 0) {
+        return `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+    } else {
+        return `${resto} min`;
+    }
+};
+
+const formatRangoHora = (fechaInicio, duracionMinutos) => {
+    if (!fechaInicio) return '—';
+    const durMin = Number(duracionMinutos) || 45;
+    let isoStr = fechaInicio;
+    if (typeof fechaInicio === 'string' && !fechaInicio.endsWith('Z') && !fechaInicio.includes('+')) {
+        isoStr = fechaInicio.replace(' ', 'T') + 'Z';
+    }
+    const inicio = new Date(isoStr);
+    const fin = new Date(inicio.getTime() + (durMin * 60000));
+    const strInicio = inicio.toLocaleTimeString('es-VE', { timeZone: 'America/Caracas', hour: '2-digit', minute: '2-digit', hour12: true });
+    const strFin = fin.toLocaleTimeString('es-VE', { timeZone: 'America/Caracas', hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${strInicio} a ${strFin}`;
+};
+
 onMounted(() => {
     if (!esComprador) {
         cargarHealthStats();
@@ -514,6 +542,12 @@ onMounted(() => {
                                 <span class="text-[10px] font-bold text-slate-400 uppercase">4. Cita Agendada</span>
                                 <div v-if="resultadoForense.cita" class="mt-2 text-xs space-y-1">
                                     <p class="font-bold text-blue-700">🚛 Cita: {{ formatFecha(resultadoForense.cita.fecha_cita) }}</p>
+                                    <div v-if="resultadoForense.cita.duracion_minutos" class="text-[11px] font-bold text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1 shadow-xs my-0.5">
+                                        <span>🕒 Apartó:</span> {{ formatRangoHora(resultadoForense.cita.fecha_cita, resultadoForense.cita.duracion_minutos) }}
+                                        <span class="text-[9px] text-blue-800 font-black bg-white px-1 rounded border border-blue-200">
+                                            {{ formatDuracionTexto(resultadoForense.cita.duracion_minutos) }}
+                                        </span>
+                                    </div>
                                     <p class="text-slate-600">Muelle: {{ resultadoForense.cita.muelle_asignado }}</p>
                                     <p class="text-slate-600">Estatus: <span class="font-bold uppercase">{{ resultadoForense.cita.estatus }}</span></p>
                                     <p class="text-slate-500">Factura: {{ resultadoForense.cita.numero_factura || 'Sin Factura' }}</p>

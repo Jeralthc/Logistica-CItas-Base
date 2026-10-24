@@ -257,7 +257,7 @@ const buscarOrden = async () => {
     
     if (citaExist) {
         const d = new Date(citaExist.fecha_cita);
-        const durMin = Math.min(240, Math.max(30, Number(citaExist.duracion_minutos) || 60));
+        const durMin = Number(citaExist.duracion_minutos) || 60;
         const dFin = new Date(d.getTime() + durMin * 60000);
         citaConfirmada.value = {
             numero_oc: citaExist.numero_oc,
@@ -316,10 +316,11 @@ const cargarSlots = async () => {
         const isTI = (modoReserva.value === 'traslado_interno');
         const numOc = isTI ? (numeroTrasladoManual.value || 'TI') : (numeroOrden.value || formProveedor.value?.numero_oc || '');
         const tipoMerc = isTI ? 'traslado_interno' : (formProveedor.value?.tipo_mercancia || formProveedor.value?.categoria_sugerida || datosOrden.value?.categoria || datosOrden.value?.tipo_mercancia || '');
+        const durReq = isTI ? duracionTraslado.value : (duracionCalculada.value || duracionEstimada.value || 60);
         const resp = await axios.get('/api/citas/slots', {
             params: { 
                 fecha: fechaSeleccionada.value, 
-                duracion: isTI ? duracionTraslado.value : duracionEstimada.value,
+                duracion: durReq,
                 sucursal: isTI ? sucursalDestinoTraslado.value : (datosOrden.value?.sucursal_destino || '0101'),
                 tipo_operacion: isTI ? 'traslado_interno' : 'proveedor',
                 numero_oc: numOc,
@@ -644,6 +645,30 @@ const formatFecha = (f) => {
 const formatHora = (f) => {
     if (!f) return '—';
     return new Date(f).toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+};
+
+const formatDuracionTexto = (duracionMinutos) => {
+    const mins = Number(duracionMinutos) || 0;
+    if (mins <= 0) return '';
+    const horas = Math.floor(mins / 60);
+    const resto = mins % 60;
+    if (horas > 0 && resto > 0) {
+        return `${horas}h ${resto}m`;
+    } else if (horas > 0) {
+        return `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+    } else {
+        return `${resto} min`;
+    }
+};
+
+const formatRangoHora = (fechaInicio, duracionMinutos) => {
+    if (!fechaInicio) return '—';
+    const durMin = Number(duracionMinutos) || 45;
+    const inicio = new Date(fechaInicio);
+    const fin = new Date(inicio.getTime() + (durMin * 60000));
+    const strInicio = inicio.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const strFin = fin.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `${strInicio} a ${strFin}`;
 };
 
 const formatFechaHora = (f) => {
@@ -979,12 +1004,16 @@ const getNombreVehiculo = (val) => {
 const duracionCalculada = ref(60);
 
 const calcularDuracionReactiva = async () => {
-    if (!formProveedor.value.peso_factura_ton || formProveedor.value.peso_factura_ton <= 0) return;
     try {
+        const peso = (formProveedor.value.peso_factura_ton && formProveedor.value.peso_factura_ton > 0) 
+            ? formProveedor.value.peso_factura_ton 
+            : 0.1;
         const resp = await axios.post('/api/calcular-duracion', {
             categoria: formProveedor.value.categoria_sugerida || formProveedor.value.tipo_mercancia || 'Alimentos 1 (Viveres)',
-            peso_ton: formProveedor.value.peso_factura_ton,
-            formato_carga: formProveedor.value.formato_carga
+            peso_ton: peso,
+            formato_carga: formProveedor.value.formato_carga || 'suelta',
+            tipo_vehiculo: formProveedor.value.tipo_vehiculo || 'camioneta_panel',
+            proveedor: formProveedor.value.proveedor || ''
         });
         duracionCalculada.value = resp.data.duracion_minutos;
         duracionEstimada.value = duracionCalculada.value;
@@ -995,6 +1024,7 @@ const calcularDuracionReactiva = async () => {
 
 watch(() => formProveedor.value.peso_factura_ton, calcularDuracionReactiva);
 watch(() => formProveedor.value.formato_carga, calcularDuracionReactiva);
+watch(() => formProveedor.value.tipo_vehiculo, calcularDuracionReactiva);
 watch(() => formProveedor.value.categoria_sugerida, (newVal) => {
     formProveedor.value.tipo_mercancia = newVal;
     calcularDuracionReactiva();
@@ -1131,6 +1161,9 @@ const continuarAHorarios = () => {
         || odcActiva.value?.destino 
         || '0101';
     datosOrden.value = { sucursal_destino: sucursalDestino };
+    if (duracionCalculada.value) {
+        duracionEstimada.value = duracionCalculada.value;
+    }
     paso.value = 2; // Ir a slots
     cargarSlots();
 };
@@ -1400,7 +1433,19 @@ onMounted(cargarCitas);
                                                 👁️ Ver Factura
                                             </a>
                                         </div>
-                                        <p class="text-xs text-slate-400">{{ cita.proveedor }} · {{ formatHora(cita.fecha_cita) }} · Sucursal {{ getSucursalNombre(cita.muelle_asignado) }}</p>
+                                        <p class="text-xs text-slate-500 font-medium flex flex-wrap items-center gap-2 mt-1">
+                                            <span class="font-bold text-slate-700">{{ cita.proveedor }}</span>
+                                            <span class="text-slate-300">·</span>
+                                            <span class="inline-flex items-center gap-1.5 font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-lg border border-blue-200 shadow-sm" title="Horario de recepción apartado">
+                                                <svg class="w-3.5 h-3.5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                <span>Apartó: <strong>{{ formatRangoHora(cita.fecha_cita, cita.duracion_minutos || 0) }}</strong></span>
+                                                <span v-if="cita.duracion_minutos" class="text-[10px] text-blue-800 font-black bg-white px-1.5 py-0.5 rounded border border-blue-200">
+                                                    {{ formatDuracionTexto(cita.duracion_minutos) }}
+                                                </span>
+                                            </span>
+                                            <span class="text-slate-300">·</span>
+                                            <span class="text-slate-500">Sucursal {{ getSucursalNombre(cita.muelle_asignado) }}</span>
+                                        </p>
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">

@@ -1,6 +1,7 @@
 *.log
 Audio_Importante.ogg
 *.ogg
+*.wav
 
 .DS_Store
 .env

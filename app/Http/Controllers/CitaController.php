@@ -23,39 +23,44 @@ class CitaController extends Controller
      */
     public static function getMuellesEquivalentes($muelle)
     {
+        $m = trim((string)$muelle);
+        if (in_array($m, ['01', '02', '03', '04', '0180'])) {
+            return ['01', '02', '03', '04', '0180'];
+        }
+
         $grupos = [
             'hiper' => ['0101', '0102'],
             'andinka' => ['0160', '0161'],
         ];
 
         foreach ($grupos as $grupo) {
-            if (in_array($muelle, $grupo)) {
+            if (in_array($m, $grupo)) {
                 return $grupo;
             }
         }
 
-        return [$muelle];
+        return [$m];
     }
 
     /**
-     * Determina si una cita, ODC o solicitud corresponde al depósito de Perecederos (Cavas/Carnes/Charcutería/Lácteos).
+     * Determina si una cita, ODC o solicitud corresponde al depósito de Perecederos (Cavas/Carnes/Charcutería/Lácteos) o Fruver.
      * Los perecederos tienen su propio depósito aparte y no le quitan horas a Unai y Juan (Recepción General).
      */
     public static function esPerecederosCita($citaOArray): bool
     {
         $muelle = is_array($citaOArray) ? ($citaOArray['muelle_asignado'] ?? $citaOArray['sucursal'] ?? '') : ($citaOArray->muelle_asignado ?? $citaOArray->sucursal ?? '');
         $muelle = trim((string)$muelle);
-        
-        if (!empty($muelle)) {
-            if (str_starts_with($muelle, '014') || str_starts_with($muelle, '015')) {
-                return true;
-            }
+
+        // Si el muelle asignado es expresamente de cavas/perecederos
+        if (!empty($muelle) && (str_starts_with($muelle, '014') || str_starts_with($muelle, '015'))) {
+            return true;
         }
 
+        // Revisar por tipo de mercancía o categoría sugerida
         $tipo = is_array($citaOArray) ? ($citaOArray['tipo_mercancia'] ?? $citaOArray['categoria_sugerida'] ?? '') : ($citaOArray->tipo_mercancia ?? '');
         $tipo = mb_strtolower(trim((string)$tipo));
         if (!empty($tipo)) {
-            $keywords = ['pereceder', 'charcuter', 'carne', 'pescad', 'congelad', 'lacteo', 'embutid', 'pollo', 'avicol'];
+            $keywords = ['pereceder', 'charcuter', 'carne', 'pescad', 'congelad', 'lacteo', 'embutid', 'pollo', 'avicol', 'fruver', 'fruta', 'verdura', 'hortaliz', 'legumbre', 'queso', 'huevo'];
             foreach ($keywords as $kw) {
                 if (str_contains($tipo, $kw)) {
                     return true;
@@ -63,13 +68,26 @@ class CitaController extends Controller
             }
         }
 
+        // Revisar por nombre del proveedor
+        $prov = is_array($citaOArray) ? ($citaOArray['proveedor'] ?? $citaOArray['nombre_proveedor'] ?? '') : ($citaOArray->proveedor ?? '');
+        $prov = mb_strtolower(trim((string)$prov));
+        if (!empty($prov)) {
+            $provKeywords = ['lacteo', 'queso', 'frigorifico', 'carnic', 'avicol', 'pollo', 'charcuter', 'embutid', 'campesino', 'pescad', 'congelad'];
+            foreach ($provKeywords as $kw) {
+                if (str_contains($prov, $kw)) {
+                    return true;
+                }
+            }
+        }
+
+        // Revisar por número de ODC en erp_ordenes_sync
         $numOc = is_array($citaOArray) ? ($citaOArray['numero_oc'] ?? '') : ($citaOArray->numero_oc ?? '');
         if (!empty($numOc)) {
             $ordenLimpia = preg_replace('/[^0-9]/', '', $numOc);
             $ordenPad = str_pad($ordenLimpia, 9, '0', STR_PAD_LEFT);
             $sync = DB::table('erp_ordenes_sync')
                 ->whereIn('numero_oc', [$numOc, $ordenLimpia, $ordenPad, 'E' . $ordenPad])
-                ->select('destino', 'categoria_sugerida')
+                ->select('destino', 'categoria_sugerida', 'resumen_json')
                 ->first();
 
             if ($sync) {
@@ -79,10 +97,19 @@ class CitaController extends Controller
                 }
 
                 $cat = mb_strtolower(trim((string)$sync->categoria_sugerida));
-                $keywords = ['pereceder', 'charcuter', 'carne', 'congelad', 'pescad', 'lacteo', 'embutid', 'pollo', 'avicol'];
+                $keywords = ['pereceder', 'charcuter', 'carne', 'congelad', 'pescad', 'lacteo', 'embutid', 'pollo', 'avicol', 'fruver', 'fruta', 'verdura', 'hortaliz', 'legumbre', 'queso', 'huevo'];
                 foreach ($keywords as $kw) {
                     if (str_contains($cat, $kw)) {
                         return true;
+                    }
+                }
+
+                if (!empty($sync->resumen_json)) {
+                    $rj = json_decode($sync->resumen_json, true);
+                    if (is_array($rj)) {
+                        if (!empty($rj['es_perecederos']) || !empty($rj['es_fruver']) || (float)($rj['Total_KG_Perecederos'] ?? $rj['total_kg'] ?? 0) > 0) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -92,12 +119,75 @@ class CitaController extends Controller
     }
 
     /**
+     * Determina si un proveedor o número de ODC corresponde a Cervecería Polar o Pepsi (Bebidas).
+     */
+    public static function esCerveceriaPolarOPepsi($proveedor, $numeroOc = null): bool
+    {
+        $texto = mb_strtoupper(trim((string)$proveedor));
+        if (str_contains($texto, 'CERVECERIA') || str_contains($texto, 'PEPSI')) {
+            return true;
+        }
+        if (!empty($numeroOc)) {
+            $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
+            $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
+            $provSync = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
+                ->value('proveedor');
+            if ($provSync) {
+                $p = mb_strtoupper((string)$provSync);
+                if (str_contains($p, 'CERVECERIA') || str_contains($p, 'PEPSI')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Determina si un proveedor o número de ODC corresponde a Alimentos Polar.
+     */
+    public static function esAlimentosPolar($proveedor, $numeroOc = null): bool
+    {
+        $texto = mb_strtoupper(trim((string)$proveedor));
+        if (str_contains($texto, 'ALIMENTOS POLAR')) {
+            return true;
+        }
+        if (str_contains($texto, 'POLAR') && !str_contains($texto, 'CERVECERIA')) {
+            return true;
+        }
+        if (!empty($numeroOc)) {
+            $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
+            $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
+            $provSync = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
+                ->value('proveedor');
+            if ($provSync) {
+                $p = mb_strtoupper((string)$provSync);
+                if (str_contains($p, 'ALIMENTOS POLAR') || (str_contains($p, 'POLAR') && !str_contains($p, 'CERVECERIA'))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Determina si corresponde al grupo Polar en general (Bebidas o Alimentos).
+     */
+    public static function esGrupoPolar($proveedor, $numeroOc = null): bool
+    {
+        return self::esCerveceriaPolarOPepsi($proveedor, $numeroOc) || self::esAlimentosPolar($proveedor, $numeroOc);
+    }
+
+    /**
      * Obtener slots disponibles para una fecha dada.
      * Horario: 8:00 AM - 7:00 PM. Última reservación: 6:00 PM.
      */
     public function slotsDisponibles(Request $request)
     {
-        $fecha = $request->input('fecha', Carbon::today()->format('Y-m-d'));
+        $timezone = 'America/Caracas';
+        $ahora = Carbon::now($timezone);
+        $fecha = $request->input('fecha', $ahora->format('Y-m-d'));
         $duracionMinutos = (int) $request->input('duracion', 60);
         $sucursal = $request->input('sucursal', '0101'); // Por defecto Hiper
         $tipoOperacion = $request->input('tipo_operacion', 'proveedor'); // 'proveedor' o 'traslado_interno'
@@ -118,10 +208,10 @@ class CitaController extends Controller
         $horaFin = 18;    // 6:00 PM (última reservación)
         $intervalo = 30;  // slots cada 30 minutos
 
-        // Obtener citas ya reservadas para esa fecha (excluyendo la cita que se esté reprogramando si aplica)
+        // Obtener citas ya reservadas para esa fecha (incluyendo finalizadas para que no se reocupen horas que ya se recibieron)
         $citasQuery = DB::table('appointments')
             ->whereDate('fecha_cita', $fecha)
-            ->whereIn('estatus', ['programada', 'en muelle']);
+            ->whereIn('estatus', ['programada', 'en muelle', 'finalizada']);
 
         $citaReprogramando = null;
         if ($request->filled('cita_id')) {
@@ -129,7 +219,7 @@ class CitaController extends Controller
             $citasQuery->where('id', '!=', $request->input('cita_id'));
         }
 
-        $citasExistentes = $citasQuery->select('id', 'fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos', 'tipo_mercancia')
+        $citasExistentes = $citasQuery->select('id', 'fecha_cita', 'muelle_asignado', 'numero_oc', 'duracion_minutos', 'tipo_mercancia', 'estatus', 'proveedor', 'es_traslado_interno')
             ->get();
 
         // Mapeo Real de Muelles por Sucursal (Fase 6)
@@ -139,7 +229,7 @@ class CitaController extends Controller
             '0111' => ['0111'], // Produccion
             '0115' => ['0115'], // Insumos
             '0140' => ['0140'], // Carnes y Perecederos
-            '0141' => ['0141'], // Carnes y Perecederos
+            '0141' => ['0141'], // Charcutería, Lácteos y Perecederos
             '0150' => ['0150'], // Depósito Perecederos
             '0160' => ['0160'], // Andinka
             '0161' => ['0161'], // Andinka
@@ -149,11 +239,38 @@ class CitaController extends Controller
 
         $muelles = $configMuelles[$sucursal] ?? [$sucursal]; // Fallback usa el código de sucursal
 
-        $carbonFecha = Carbon::parse($fecha);
+        $carbonFecha = Carbon::parse($fecha, $timezone);
+        $esHoy = $carbonFecha->isSameDay($ahora);
+        $esPasado = $carbonFecha->lt($ahora->copy()->startOfDay());
         $esMiercoles = ($carbonFecha->dayOfWeek === Carbon::WEDNESDAY);
         $esSabado = ($carbonFecha->dayOfWeek === Carbon::SATURDAY);
+        $esMartes = ($carbonFecha->dayOfWeek === Carbon::TUESDAY);
+        $esViernes = ($carbonFecha->dayOfWeek === Carbon::FRIDAY);
+        $esMartesOViernes = ($esMartes || $esViernes);
 
-        // Determinar si la solicitud actual corresponde a Perecederos (depósito aparte)
+        $muellesHiper = ['0101', '0102'];
+        $esHiper = empty($sucursal) || in_array($sucursal, $muellesHiper);
+
+        // Identificar proveedor y ODC de la solicitud
+        $proveedorSolicitud = $request->input('proveedor', $citaReprogramando->proveedor ?? '');
+        $numeroOcSolicitud = $request->input('numero_oc', $citaReprogramando->numero_oc ?? '');
+        if (empty($proveedorSolicitud) && !empty($numeroOcSolicitud)) {
+            $numLimpio = preg_replace('/[^0-9]/', '', $numeroOcSolicitud);
+            $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
+            $proveedorSolicitud = DB::table('erp_ordenes_sync')
+                ->whereIn('numero_oc', [$numeroOcSolicitud, $numLimpio, $numPad, 'E' . $numPad])
+                ->value('proveedor');
+            if (empty($proveedorSolicitud)) {
+                $proveedorSolicitud = DB::table('appointments')
+                    ->whereIn('numero_oc', [$numeroOcSolicitud, $numLimpio, $numPad])
+                    ->value('proveedor') ?? '';
+            }
+        }
+
+        $esPepsiOCerveceria = self::esCerveceriaPolarOPepsi($proveedorSolicitud, $numeroOcSolicitud);
+        $esAlimentosPolar = self::esAlimentosPolar($proveedorSolicitud, $numeroOcSolicitud);
+
+        // Determinar si la solicitud actual corresponde a Perecederos o Fruver (depósito aparte)
         $solicitudEsPerecederos = self::esPerecederosCita([
             'sucursal' => $sucursal ?: ($citaReprogramando->muelle_asignado ?? null),
             'numero_oc' => $request->input('numero_oc', $citaReprogramando->numero_oc ?? null),
@@ -164,79 +281,154 @@ class CitaController extends Controller
         for ($h = $horaInicio; $h < $horaFin; $h++) {
             for ($m = 0; $m < 60; $m += $intervalo) {
                 $horaStr = sprintf('%02d:%02d', $h, $m);
-                $slotInicio = Carbon::parse("$fecha $horaStr");
+                $slotInicio = Carbon::parse("$fecha $horaStr", $timezone);
                 $slotFin = $slotInicio->copy()->addMinutes((int) $duracionMinutos);
 
                 // No pasar de las 7 PM
-                $limiteLaboral = Carbon::parse("$fecha 19:00");
+                $limiteLaboral = Carbon::parse("$fecha 19:00", $timezone);
                 if ($slotFin->gt($limiteLaboral)) continue;
 
-                // Verificación de bloqueos de horario (Hoja manuscrita y reglas de recepción)
+                // Verificación de bloqueos de horario
                 $bloqueadoPorHorario = false;
                 $motivoBloqueo = null;
 
-                if ($tipoOperacion !== 'traslado_interno') {
-                    // 1. Sábado Bloqueado para Proveedores
-                    if ($esSabado) {
-                        $bloqueadoPorHorario = true;
-                        $motivoBloqueo = 'Sábados bloqueados para recepción de proveedores.';
-                    }
-                    // 2. Miércoles: Proveedores hasta 11 AM (Después BLOQUEADO)
-                    elseif ($esMiercoles && $h >= 11) {
-                        $bloqueadoPorHorario = true;
-                        $motivoBloqueo = 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.';
-                    }
-                } else {
-                    // 3. Galpones / Traslado Interno: Miércoles a partir de las 2:00 PM (14:00)
-                    if ($esMiercoles && $h < 14) {
-                        $bloqueadoPorHorario = true;
-                        $motivoBloqueo = 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.';
-                    }
+                // 0. BLOQUEO ESTRICTO: Horas que ya transcurrieron hoy o fechas pasadas
+                if ($esPasado) {
+                    $bloqueadoPorHorario = true;
+                    $motivoBloqueo = 'Fecha ya transcurrida.';
+                } elseif ($esHoy && $slotInicio->lte($ahora)) {
+                    $bloqueadoPorHorario = true;
+                    $motivoBloqueo = 'Horario ya transcurrido (tiempo pasado).';
                 }
 
-                // Regla de negocio:
-                // - Recepción General (Unai y Juan): Regla estricta. Si la hora ya está ocupada por otra recepción general, no se puede agendar nadie más.
-                // - Perecederos: Es un depósito aparte con su propia cava. No le quita horas a los demás proveedores ni se ve bloqueado por ellos.
-                $citaSolapada = null;
-                foreach ($citasExistentes as $cita) {
-                    $citaEsPerecederos = self::esPerecederosCita($cita);
-
-                    // Si uno es Perecederos y el otro es General, no compiten por el mismo andén
-                    if ($solicitudEsPerecederos !== $citaEsPerecederos) {
-                        continue;
-                    }
-
-                    $citaInicio = Carbon::parse($cita->fecha_cita);
-                    $duracionReal = $cita->duracion_minutos ?? $duracionMinutos;
-                    $citaFin = $citaInicio->copy()->addMinutes((int) $duracionReal);
-
-                    // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
-                    if ($slotInicio->lt($citaFin) && $slotFin->gt($citaInicio)) {
-                        if ($solicitudEsPerecederos) {
-                            // En Perecederos se agenda normal (conflicto solo si es el mismo muelle)
-                            $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
-                            $muellesEquivSolicitud = self::getMuellesEquivalentes($sucursal);
-                            if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
-                                $citaSolapada = $cita;
-                                break;
+                if (!$bloqueadoPorHorario) {
+                    if ($tipoOperacion !== 'traslado_interno') {
+                        // 1. Sábado Bloqueado para Proveedores
+                        if ($esSabado) {
+                            $bloqueadoPorHorario = true;
+                            $motivoBloqueo = 'Sábados bloqueados para recepción de proveedores.';
+                        }
+                        // 2. Miércoles: Proveedores hasta 11 AM (Después BLOQUEADO)
+                        elseif ($esMiercoles && $h >= 11) {
+                            $bloqueadoPorHorario = true;
+                            $motivoBloqueo = 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.';
+                        }
+                        // 3. Reglas especiales POLAR Martes y Viernes en Hiper Suraki
+                        elseif ($esMartesOViernes && $esHiper) {
+                            // 08:00 AM a 10:00 AM: Reservado para Cervecería Polar / Pepsi
+                            if ($h >= 8 && $h < 10) {
+                                if (!$esPepsiOCerveceria) {
+                                    $bloqueadoPorHorario = true;
+                                    $motivoBloqueo = 'Horario de 8:00 AM a 10:00 AM reservado exclusivamente para Cervecería Polar / Pepsi.';
+                                }
                             }
-                        } else {
-                            // En recepción general: regla estricta compartida
-                            $citaSolapada = $cita;
-                            break;
+                            // 12:00 PM a 02:00 PM (12:00 a 14:00): Reservado para Alimentos Polar
+                            elseif ($h >= 12 && $h < 14) {
+                                if (!$esAlimentosPolar) {
+                                    $bloqueadoPorHorario = true;
+                                    $motivoBloqueo = 'Horario de 12:00 PM a 2:00 PM reservado exclusivamente para Alimentos Polar.';
+                                }
+                            }
+                        }
+                    } else {
+                        // 4. Galpones / Traslado Interno: Miércoles a partir de las 2:00 PM (14:00)
+                        if ($esMiercoles && $h < 14) {
+                            $bloqueadoPorHorario = true;
+                            $motivoBloqueo = 'Los días miércoles los traslados de galpones se reciben únicamente a partir de las 2:00 PM.';
                         }
                     }
                 }
 
+                $citaSolapada = null;
+                $motivoOcupado = null;
+
+                // Prevención de choque físico en patio de Hiper Suraki (Audio 04):
+                // Dos proveedores externos no pueden coincidir exactamente a la misma hora de inicio en el patio
+                if (!$bloqueadoPorHorario && $esHiper && $tipoOperacion !== 'traslado_interno') {
+                    foreach ($citasExistentes as $citaPatio) {
+                        if ($citaPatio->es_traslado_interno ?? false) continue;
+                        $mPatio = $citaPatio->muelle_asignado ?? '';
+                        if (in_array($mPatio, ['0101', '0102', '0140', '0141'])) {
+                            $inicioPatio = Carbon::parse($citaPatio->fecha_cita, $timezone);
+                            if ($inicioPatio->equalTo($slotInicio)) {
+                                $citaSolapada = $citaPatio;
+                                $pNombre = $citaPatio->proveedor ?? 'otro proveedor';
+                                $motivoOcupado = "Recepción simultánea en patio a esta misma hora ({$pNombre})";
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Filtrar citas competidoras:
+                // - Separación de Perecederos vs General
+                // - Equivalencia estricta de muelles (Hiper 0101/0102 nunca bloquea Galpón 0180 ni Insumos 0115)
+                $citasCompatibles = [];
+                foreach ($citasExistentes as $cita) {
+                    $citaEsPerecederos = self::esPerecederosCita($cita);
+                    if ($solicitudEsPerecederos !== $citaEsPerecederos) {
+                        continue;
+                    }
+                    $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+                    $muellesEquivSolicitud = self::getMuellesEquivalentes($sucursal);
+                    if (empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
+                        continue;
+                    }
+                    $citasCompatibles[] = $cita;
+                }
+
+                // 1. ¿Cae dentro de una cita que ya está agendada/en curso/finalizada en este horario?
+                foreach ($citasCompatibles as $cita) {
+                    $citaInicio = Carbon::parse($cita->fecha_cita, $timezone);
+                    $duracionReal = $cita->duracion_minutos ?? 60;
+                    $citaFin = $citaInicio->copy()->addMinutes((int) $duracionReal);
+
+                    if ($slotInicio->gte($citaInicio) && $slotInicio->lt($citaFin)) {
+                        $citaSolapada = $cita;
+                        $motivoOcupado = ($cita->estatus === 'finalizada') 
+                            ? 'Horario ya utilizado por recepción completada' 
+                            : 'Horario ya apartado por otra recepción';
+                        break;
+                    }
+                }
+
+                // 2. Si no cae dentro, buscar la próxima cita que comience DESPUÉS de $slotInicio
+                $duracionEfectivaSlot = $duracionMinutos;
+                if (!$citaSolapada) {
+                    $minutosHastaProxima = null;
+                    $proximaCita = null;
+                    foreach ($citasCompatibles as $cita) {
+                        $citaInicio = Carbon::parse($cita->fecha_cita, $timezone);
+                        if ($citaInicio->gte($slotInicio)) {
+                            $diff = $slotInicio->diffInMinutes($citaInicio);
+                            if ($minutosHastaProxima === null || $diff < $minutosHastaProxima) {
+                                $minutosHastaProxima = $diff;
+                                $proximaCita = $cita;
+                            }
+                        }
+                    }
+
+                    if ($minutosHastaProxima !== null) {
+                        if ($minutosHastaProxima < 45) {
+                            $citaSolapada = $proximaCita;
+                            $motivoOcupado = "Espacio insuficiente ({$minutosHastaProxima} min libres antes de la siguiente recepción)";
+                        } else {
+                            $duracionEfectivaSlot = min($duracionMinutos, $minutosHastaProxima);
+                        }
+                    }
+                }
+
+                $slotFinEfectivo = $slotInicio->copy()->addMinutes((int) $duracionEfectivaSlot);
                 $disponible = !$bloqueadoPorHorario && ($citaSolapada === null);
 
                 $slots[] = [
                     'hora' => $horaStr,
                     'hora_formato' => $slotInicio->format('h:i A'),
-                    'hora_fin' => $slotFin->format('h:i A'),
+                    'hora_fin' => $slotFinEfectivo->format('h:i A'),
+                    'duracion_minutos' => $duracionEfectivaSlot,
                     'disponible' => $disponible,
                     'bloqueado_horario' => $bloqueadoPorHorario,
-                    'motivo_bloqueo' => $motivoBloqueo ?? ($citaSolapada ? 'Horario ya apartado por otra recepción' : null),
+                    'motivo_bloqueo' => $motivoBloqueo ?? ($citaSolapada ? ($motivoOcupado ?? 'Horario ya apartado por otra recepción') : null),
                     'muelles_libres' => $disponible ? 1 : 0,
                     'muelles' => $disponible ? $muelles : [],
                 ];
@@ -244,13 +436,19 @@ class CitaController extends Controller
         }
 
         // Fechas disponibles (próximos días hábiles)
-        // Regla: Excluir domingos siempre.
-        // Regla: Sábado bloqueado para proveedores externos.
         $fechasDisponibles = [];
         for ($i = 0; $i < 14; $i++) {
-            $d = Carbon::today()->addDays($i);
+            $d = Carbon::today($timezone)->addDays($i);
             if ($d->dayOfWeek === Carbon::SUNDAY) continue;
             if ($tipoOperacion !== 'traslado_interno' && $d->dayOfWeek === Carbon::SATURDAY) continue;
+
+            // Si es hoy, verificar si aún quedan horas laborales disponibles antes de las 5:30 PM
+            if ($d->isToday()) {
+                $limiteHoy = Carbon::parse($d->format('Y-m-d') . ' 17:30', $timezone);
+                if ($ahora->gte($limiteHoy)) {
+                    continue; // Jornada de hoy concluida, comenzar desde mañana
+                }
+            }
 
             $fechasDisponibles[] = [
                 'fecha' => $d->format('Y-m-d'),
@@ -325,8 +523,15 @@ class CitaController extends Controller
             $duracion = $validated['duracion_minutos'];
         }
 
-        $fechaCita = Carbon::parse($validated['fecha_cita']);
+        $timezone = 'America/Caracas';
+        $ahora = Carbon::now($timezone);
+        $fechaCita = Carbon::parse($validated['fecha_cita'], $timezone);
         $fechaFin = $fechaCita->copy()->addMinutes((int) $duracion);
+
+        // Validar que la fecha/hora no haya transcurrido
+        if ($fechaCita->lte($ahora)) {
+            return response()->json(['error' => 'No es posible agendar citas en un horario que ya ha transcurrido.'], 422);
+        }
 
         // Validar horario general
         if ($fechaCita->hour < 8 || $fechaCita->hour >= 18) {
@@ -339,12 +544,36 @@ class CitaController extends Controller
         }
 
         // Validar bloqueos según tipo de operación
+        $esMartesOViernes = in_array($fechaCita->dayOfWeek, [Carbon::TUESDAY, Carbon::FRIDAY]);
+        $muellesHiper = ['0101', '0102'];
+        $esHiper = in_array($validated['muelle_asignado'] ?? '0101', $muellesHiper);
+
         if (!$isTrasladoInterno) {
             if ($fechaCita->dayOfWeek === Carbon::SATURDAY) {
                 return response()->json(['error' => 'Los sábados están bloqueados para recepción de proveedores.'], 422);
             }
             if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
                 return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
+            }
+            // Reglas especiales Martes y Viernes para POLAR en Hiper Suraki
+            if ($esMartesOViernes && $esHiper) {
+                $horaH = $fechaCita->hour;
+                $provNombre = $validated['proveedor'] ?? '';
+                $numOc = $validated['numero_oc'] ?? null;
+
+                if ($horaH >= 8 && $horaH < 10) {
+                    if (!self::esCerveceriaPolarOPepsi($provNombre, $numOc)) {
+                        return response()->json([
+                            'error' => 'Los días martes y viernes de 08:00 AM a 10:00 AM el andén está reservado exclusivamente para recepción de Cervecería Polar y Pepsi.'
+                        ], 422);
+                    }
+                } elseif ($horaH >= 12 && $horaH < 14) {
+                    if (!self::esAlimentosPolar($provNombre, $numOc)) {
+                        return response()->json([
+                            'error' => 'Los días martes y viernes de 12:00 PM a 02:00 PM el andén está reservado exclusivamente para recepción de Alimentos Polar.'
+                        ], 422);
+                    }
+                }
             }
         } else {
             // Galpones: Miércoles únicamente a partir de las 2:00 PM (14:00)
@@ -361,32 +590,85 @@ class CitaController extends Controller
             'tipo_mercancia' => $tipoMercanciaInput,
         ]);
 
-        // Verificar que NO exista ninguna cita agendada en ese horario (separación de depósitos)
+        // Si es perecederos/fruver y viene asignado a muelle general, corregir automáticamente al muelle de cavas
+        if ($solicitudEsPerecederos && in_array($validated['muelle_asignado'], ['0101', '0102', '01', '02', '03', '04', '0180'])) {
+            $catNorm = strtolower($tipoMercanciaInput ?? '');
+            if (str_contains($catNorm, 'carne') || str_contains($catNorm, 'pollo') || str_contains($catNorm, 'pescado') || str_contains($catNorm, 'congelado')) {
+                $validated['muelle_asignado'] = '0140';
+            } else {
+                $validated['muelle_asignado'] = '0141';
+            }
+        }
+
+        // Verificar que NO exista ninguna cita agendada en ese horario (incluyendo finalizadas para que no se reocupen horas que ya se recibieron)
         $citasExistentes = DB::table('appointments')
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
-            ->whereIn('estatus', ['programada', 'en muelle'])
+            ->whereIn('estatus', ['programada', 'en muelle', 'finalizada'])
             ->get();
 
-        foreach ($citasExistentes as $cita) {
-            $citaEsPerecederos = self::esPerecederosCita($cita);
-
-            // Si uno es Perecederos y el otro es General, no compiten entre sí (depósitos independientes)
-            if ($solicitudEsPerecederos !== $citaEsPerecederos) {
-                continue;
+        // Prevención de choque físico en patio de Hiper Suraki (Audio 04):
+        if ($esHiper && !$isTrasladoInterno) {
+            foreach ($citasExistentes as $citaPatio) {
+                if ($citaPatio->es_traslado_interno ?? false) continue;
+                $mPatio = $citaPatio->muelle_asignado ?? '';
+                if (in_array($mPatio, ['0101', '0102', '0140', '0141'])) {
+                    $inicioPatio = Carbon::parse($citaPatio->fecha_cita, $timezone);
+                    if ($inicioPatio->equalTo($fechaCita)) {
+                        return response()->json([
+                            'error' => "Conflicto de patio: Ya existe una recepción de proveedor programada exactamente a las " . $inicioPatio->format('h:i A') . " ({$citaPatio->proveedor}, Orden: {$citaPatio->numero_oc}). Por favor seleccione otro bloque horario para evitar congestión en el patio."
+                        ], 422);
+                    }
+                }
             }
+        }
 
-            $inicioExistente = Carbon::parse($cita->fecha_cita);
+        $citasCompetidoras = $citasExistentes->filter(function($cita) use ($solicitudEsPerecederos, $validated) {
+            $citaEsPerecederos = self::esPerecederosCita($cita);
+            if ($solicitudEsPerecederos !== $citaEsPerecederos) return false;
+            $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+            $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+            return !empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud));
+        });
+
+        // 1. Validar que la hora seleccionada no caiga dentro de una cita en curso
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
+            $duracionExistente = $cita->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
+            if ($fechaCita->gte($inicioExistente) && $fechaCita->lt($finExistente)) {
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada en curso de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
+            }
+        }
+
+        // 2. Buscar próxima cita que comience DESPUÉS de $fechaCita para calcular ventana disponible
+        $minutosVentana = null;
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
+            if ($inicioExistente->gte($fechaCita)) {
+                $diff = $fechaCita->diffInMinutes($inicioExistente);
+                if ($minutosVentana === null || $diff < $minutosVentana) {
+                    $minutosVentana = $diff;
+                }
+            }
+        }
+
+        // 3. Ajuste dinámico de duración: si la duración excede la ventana pero hay al menos 45 min libres
+        if ($minutosVentana !== null && $duracion > $minutosVentana) {
+            if ($minutosVentana >= 45) {
+                $duracion = (int) $minutosVentana;
+                $fechaFin = $fechaCita->copy()->addMinutes($duracion);
+            }
+        }
+
+        // 4. Verificación final de conflicto
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
             $duracionExistente = $cita->duracion_minutos ?? 60;
             $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
-            // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
                 if ($solicitudEsPerecederos) {
-                    $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
-                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
-                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
-                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
-                    }
+                    return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
                 } else {
                     return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
                 }
@@ -545,9 +827,15 @@ class CitaController extends Controller
             return response()->json(['error' => 'Cita no encontrada.'], 404);
         }
 
-        $fechaCita = Carbon::parse($validated['fecha_cita']);
+        $timezone = 'America/Caracas';
+        $ahora = Carbon::now($timezone);
+        $fechaCita = Carbon::parse($validated['fecha_cita'], $timezone);
         $duracion = $cita->duracion_minutos ?? 60;
         $fechaFin = $fechaCita->copy()->addMinutes((int) $duracion);
+
+        if ($fechaCita->lte($ahora)) {
+            return response()->json(['error' => 'No es posible reprogramar a un horario que ya ha transcurrido.'], 422);
+        }
 
         if ($fechaCita->hour < 8 || $fechaCita->hour >= 18) {
             return response()->json(['error' => 'El horario de reservación es de 8:00 AM a 6:00 PM.'], 422);
@@ -558,12 +846,36 @@ class CitaController extends Controller
         }
 
         $isTrasladoInterno = filter_var($cita->es_traslado_interno ?? false, FILTER_VALIDATE_BOOLEAN) || str_starts_with($cita->numero_oc ?? '', 'TI-');
+        $esMartesOViernes = in_array($fechaCita->dayOfWeek, [Carbon::TUESDAY, Carbon::FRIDAY]);
+        $muellesHiper = ['0101', '0102'];
+        $esHiper = in_array($validated['muelle_asignado'] ?? '0101', $muellesHiper);
+
         if (!$isTrasladoInterno) {
             if ($fechaCita->dayOfWeek === Carbon::SATURDAY) {
                 return response()->json(['error' => 'Los sábados están bloqueados para recepción de proveedores.'], 422);
             }
             if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
                 return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
+            }
+            // Reglas especiales Martes y Viernes para POLAR en Hiper Suraki
+            if ($esMartesOViernes && $esHiper) {
+                $horaH = $fechaCita->hour;
+                $provNombre = $cita->proveedor ?? '';
+                $numOc = $cita->numero_oc ?? null;
+
+                if ($horaH >= 8 && $horaH < 10) {
+                    if (!self::esCerveceriaPolarOPepsi($provNombre, $numOc)) {
+                        return response()->json([
+                            'error' => 'Los días martes y viernes de 08:00 AM a 10:00 AM el andén está reservado exclusivamente para recepción de Cervecería Polar y Pepsi.'
+                        ], 422);
+                    }
+                } elseif ($horaH >= 12 && $horaH < 14) {
+                    if (!self::esAlimentosPolar($provNombre, $numOc)) {
+                        return response()->json([
+                            'error' => 'Los días martes y viernes de 12:00 PM a 02:00 PM el andén está reservado exclusivamente para recepción de Alimentos Polar.'
+                        ], 422);
+                    }
+                }
             }
         } else {
             if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour < 14) {
@@ -578,33 +890,85 @@ class CitaController extends Controller
             'tipo_mercancia' => $cita->tipo_mercancia,
         ]);
 
-        // Verificar que el horario esté libre, respetando la separación de depósitos
+        if ($solicitudEsPerecederos && in_array($validated['muelle_asignado'], ['0101', '0102', '01', '02', '03', '04', '0180'])) {
+            $catNorm = strtolower($cita->tipo_mercancia ?? '');
+            if (str_contains($catNorm, 'carne') || str_contains($catNorm, 'pollo') || str_contains($catNorm, 'pescado') || str_contains($catNorm, 'congelado')) {
+                $validated['muelle_asignado'] = '0140';
+            } else {
+                $validated['muelle_asignado'] = '0141';
+            }
+        }
+
+        // Verificar que el horario esté libre, respetando la separación de depósitos e incluyendo citas finalizadas
         $citasExistentes = DB::table('appointments')
             ->where('id', '!=', $id)
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
-            ->whereIn('estatus', ['programada', 'en muelle'])
+            ->whereIn('estatus', ['programada', 'en muelle', 'finalizada'])
             ->get();
 
-        foreach ($citasExistentes as $c) {
-            $cEsPerecederos = self::esPerecederosCita($c);
-
-            // Depósitos separados: Perecederos vs General no compiten entre sí
-            if ($solicitudEsPerecederos !== $cEsPerecederos) {
-                continue;
+        // Prevención de choque físico en patio de Hiper Suraki (Audio 04):
+        if ($esHiper && !$isTrasladoInterno) {
+            foreach ($citasExistentes as $citaPatio) {
+                if ($citaPatio->es_traslado_interno ?? false) continue;
+                $mPatio = $citaPatio->muelle_asignado ?? '';
+                if (in_array($mPatio, ['0101', '0102', '0140', '0141'])) {
+                    $inicioPatio = Carbon::parse($citaPatio->fecha_cita, $timezone);
+                    if ($inicioPatio->equalTo($fechaCita)) {
+                        return response()->json([
+                            'error' => "Conflicto de patio: Ya existe una recepción de proveedor programada exactamente a las " . $inicioPatio->format('h:i A') . " ({$citaPatio->proveedor}, Orden: {$citaPatio->numero_oc}). Por favor seleccione otro bloque horario para evitar congestión en el patio."
+                        ], 422);
+                    }
+                }
             }
+        }
 
-            $inicioExistente = Carbon::parse($c->fecha_cita);
+        $citasCompetidoras = $citasExistentes->filter(function($c) use ($solicitudEsPerecederos, $validated) {
+            $cEsPerecederos = self::esPerecederosCita($c);
+            if ($solicitudEsPerecederos !== $cEsPerecederos) return false;
+            $muellesEquivCita = self::getMuellesEquivalentes($c->muelle_asignado);
+            $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+            return !empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud));
+        });
+
+        // 1. Validar que la hora seleccionada no caiga dentro de una cita en curso
+        foreach ($citasCompetidoras as $c) {
+            $inicioExistente = Carbon::parse($c->fecha_cita, $timezone);
+            $duracionExistente = $c->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
+            if ($fechaCita->gte($inicioExistente) && $fechaCita->lt($finExistente)) {
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada en curso de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})."], 422);
+            }
+        }
+
+        // 2. Buscar próxima cita que comience DESPUÉS de $fechaCita para calcular ventana disponible
+        $minutosVentana = null;
+        foreach ($citasCompetidoras as $c) {
+            $inicioExistente = Carbon::parse($c->fecha_cita, $timezone);
+            if ($inicioExistente->gte($fechaCita)) {
+                $diff = $fechaCita->diffInMinutes($inicioExistente);
+                if ($minutosVentana === null || $diff < $minutosVentana) {
+                    $minutosVentana = $diff;
+                }
+            }
+        }
+
+        // 3. Ajuste dinámico de duración: si la duración excede la ventana pero hay al menos 45 min libres
+        if ($minutosVentana !== null && $duracion > $minutosVentana) {
+            if ($minutosVentana >= 45) {
+                $duracion = (int) $minutosVentana;
+                $fechaFin = $fechaCita->copy()->addMinutes($duracion);
+            }
+        }
+
+        // 4. Verificación final de conflicto
+        foreach ($citasCompetidoras as $c) {
+            $inicioExistente = Carbon::parse($c->fecha_cita, $timezone);
             $duracionExistente = $c->duracion_minutos ?? 60;
             $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
-            // Hay solapamiento si: inicio < citaFin AND fin > citaInicio
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
                 if ($solicitudEsPerecederos) {
-                    $muellesEquivCita = self::getMuellesEquivalentes($c->muelle_asignado);
-                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
-                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
-                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})."], 422);
-                    }
+                    return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc})."], 422);
                 } else {
                     return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$c->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
                 }
@@ -619,6 +983,7 @@ class CitaController extends Controller
         DB::table('appointments')->where('id', $id)->update([
             'fecha_cita' => $fechaCita,
             'muelle_asignado' => $validated['muelle_asignado'],
+            'duracion_minutos' => $duracion,
             'updated_at' => now(),
         ]);
 
@@ -2019,14 +2384,18 @@ class CitaController extends Controller
         $validated = $request->validate([
             'categoria' => 'required|string',
             'peso_ton' => 'required|numeric',
-            'formato_carga' => 'required|string'
+            'formato_carga' => 'required|string',
+            'tipo_vehiculo' => 'nullable|string',
+            'proveedor' => 'nullable|string'
         ]);
 
         $minutos = \App\Services\AppointmentDurationService::calcular(
             $validated['categoria'],
             $validated['peso_ton'],
             $validated['formato_carga'],
-            0
+            0,
+            $validated['tipo_vehiculo'] ?? null,
+            $validated['proveedor'] ?? null
         );
 
         return response()->json(['duracion_minutos' => $minutos]);
@@ -2072,7 +2441,9 @@ class CitaController extends Controller
             }
         }
 
-        $fechaCita = Carbon::parse($validated['fecha_cita']);
+        $timezone = 'America/Caracas';
+        $ahora = Carbon::now($timezone);
+        $fechaCita = Carbon::parse($validated['fecha_cita'], $timezone);
         
         $tipoMercancia = $validated['tipo_mercancia'] ?? $validated['categoria_sugerida'] ?? null;
         $catNombre = $tipoMercancia ?? 'Alimentos 1 (Viveres)';
@@ -2091,10 +2462,17 @@ class CitaController extends Controller
             $catNombre,
             $pesoFacturaTon,
             $formatoCarga,
-            0
+            0,
+            $tipoVehiculo,
+            $validated['proveedor'] ?? null
         );
 
         $fechaFin = $fechaCita->copy()->addMinutes((int) $duracion);
+
+        // Validar que la fecha/hora no haya transcurrido
+        if ($fechaCita->lte($ahora)) {
+            return response()->json(['error' => 'No es posible agendar citas en un horario que ya ha transcurrido.'], 422);
+        }
 
         // Validaciones de horario...
         if ($fechaCita->hour < 8 || $fechaCita->hour >= 18) {
@@ -2110,6 +2488,31 @@ class CitaController extends Controller
             return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
         }
 
+        // Reglas especiales Martes y Viernes para POLAR en Hiper Suraki
+        $esMartesOViernes = in_array($fechaCita->dayOfWeek, [Carbon::TUESDAY, Carbon::FRIDAY]);
+        $muellesHiper = ['0101', '0102'];
+        $esHiper = in_array($validated['muelle_asignado'] ?? '0101', $muellesHiper);
+
+        if ($esMartesOViernes && $esHiper) {
+            $horaH = $fechaCita->hour;
+            $provNombre = $validated['proveedor'] ?? '';
+            $numOc = $validated['numero_oc'] ?? null;
+
+            if ($horaH >= 8 && $horaH < 10) {
+                if (!self::esCerveceriaPolarOPepsi($provNombre, $numOc)) {
+                    return response()->json([
+                        'error' => 'Los días martes y viernes de 08:00 AM a 10:00 AM el andén está reservado exclusivamente para recepción de Cervecería Polar y Pepsi.'
+                    ], 422);
+                }
+            } elseif ($horaH >= 12 && $horaH < 14) {
+                if (!self::esAlimentosPolar($provNombre, $numOc)) {
+                    return response()->json([
+                        'error' => 'Los días martes y viernes de 12:00 PM a 02:00 PM el andén está reservado exclusivamente para recepción de Alimentos Polar.'
+                    ], 422);
+                }
+            }
+        }
+
         // Determinar si la solicitud del proveedor corresponde a Perecederos (depósito aparte)
         $solicitudEsPerecederos = self::esPerecederosCita([
             'muelle_asignado' => $validated['muelle_asignado'],
@@ -2118,31 +2521,85 @@ class CitaController extends Controller
             'categoria_sugerida' => $validated['categoria_sugerida'] ?? null,
         ]);
 
-        // Verificar disponibilidad de horario respetando la separación de depósitos
+        if ($solicitudEsPerecederos && in_array($validated['muelle_asignado'], ['0101', '0102', '01', '02', '03', '04', '0180'])) {
+            $catNorm = strtolower($tipoMercancia ?? '');
+            if (str_contains($catNorm, 'carne') || str_contains($catNorm, 'pollo') || str_contains($catNorm, 'pescado') || str_contains($catNorm, 'congelado')) {
+                $validated['muelle_asignado'] = '0140';
+            } else {
+                $validated['muelle_asignado'] = '0141';
+            }
+        }
+
+        // Verificar disponibilidad de horario respetando la separación de depósitos e incluyendo citas finalizadas
         $citasExistentes = DB::table('appointments')
             ->whereDate('fecha_cita', $fechaCita->format('Y-m-d'))
-            ->whereIn('estatus', ['programada', 'en muelle'])
+            ->whereIn('estatus', ['programada', 'en muelle', 'finalizada'])
             ->get();
 
-        foreach ($citasExistentes as $cita) {
-            $citaEsPerecederos = self::esPerecederosCita($cita);
-
-            // Depósitos separados: Perecederos vs General no compiten entre sí
-            if ($solicitudEsPerecederos !== $citaEsPerecederos) {
-                continue;
+        // Prevención de choque físico en patio de Hiper Suraki (Audio 04):
+        if ($esHiper) {
+            foreach ($citasExistentes as $citaPatio) {
+                if ($citaPatio->es_traslado_interno ?? false) continue;
+                $mPatio = $citaPatio->muelle_asignado ?? '';
+                if (in_array($mPatio, ['0101', '0102', '0140', '0141'])) {
+                    $inicioPatio = Carbon::parse($citaPatio->fecha_cita, $timezone);
+                    if ($inicioPatio->equalTo($fechaCita)) {
+                        return response()->json([
+                            'error' => "Conflicto de patio: Ya existe una recepción de proveedor programada exactamente a las " . $inicioPatio->format('h:i A') . " ({$citaPatio->proveedor}, Orden: {$citaPatio->numero_oc}). Por favor seleccione otro bloque horario para evitar congestión en el patio."
+                        ], 422);
+                    }
+                }
             }
+        }
 
-            $inicioExistente = Carbon::parse($cita->fecha_cita);
+        $citasCompetidoras = $citasExistentes->filter(function($cita) use ($solicitudEsPerecederos, $validated) {
+            $citaEsPerecederos = self::esPerecederosCita($cita);
+            if ($solicitudEsPerecederos !== $citaEsPerecederos) return false;
+            $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
+            $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
+            return !empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud));
+        });
+
+        // 1. Validar que la hora seleccionada no caiga dentro de una cita en curso
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
+            $duracionExistente = $cita->duracion_minutos ?? 60;
+            $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
+            if ($fechaCita->gte($inicioExistente) && $fechaCita->lt($finExistente)) {
+                return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada en curso de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
+            }
+        }
+
+        // 2. Buscar próxima cita que comience DESPUÉS de $fechaCita para calcular ventana disponible
+        $minutosVentana = null;
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
+            if ($inicioExistente->gte($fechaCita)) {
+                $diff = $fechaCita->diffInMinutes($inicioExistente);
+                if ($minutosVentana === null || $diff < $minutosVentana) {
+                    $minutosVentana = $diff;
+                }
+            }
+        }
+
+        // 3. Ajuste dinámico de duración: si la duración excede la ventana pero hay al menos 45 min libres
+        if ($minutosVentana !== null && $duracion > $minutosVentana) {
+            if ($minutosVentana >= 45) {
+                \Illuminate\Support\Facades\Log::info("Ajuste dinámico de duración ODC {$validated['numero_oc']}: de {$duracion} min a {$minutosVentana} min para encajar en ventana disponible.");
+                $duracion = (int) $minutosVentana;
+                $fechaFin = $fechaCita->copy()->addMinutes($duracion);
+            }
+        }
+
+        // 4. Verificación final de conflicto
+        foreach ($citasCompetidoras as $cita) {
+            $inicioExistente = Carbon::parse($cita->fecha_cita, $timezone);
             $duracionExistente = $cita->duracion_minutos ?? 60;
             $finExistente = $inicioExistente->copy()->addMinutes((int) $duracionExistente);
 
             if ($fechaCita->lt($finExistente) && $fechaFin->gt($inicioExistente)) {
                 if ($solicitudEsPerecederos) {
-                    $muellesEquivCita = self::getMuellesEquivalentes($cita->muelle_asignado);
-                    $muellesEquivSolicitud = self::getMuellesEquivalentes($validated['muelle_asignado']);
-                    if (!empty(array_intersect($muellesEquivCita, $muellesEquivSolicitud))) {
-                        return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
-                    }
+                    return response()->json(['error' => 'Conflicto de horario en Perecederos: Ya existe una cita agendada en este muelle de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc})."], 422);
                 } else {
                     return response()->json(['error' => 'Conflicto de horario: Ya existe una cita agendada de ' . $inicioExistente->format('h:i A') . ' a ' . $finExistente->format('h:i A') . " (Orden: {$cita->numero_oc}). No es posible agendar más de una recepción simultánea."], 422);
                 }
@@ -2536,7 +2993,8 @@ class CitaController extends Controller
             $catNombre,
             $pesoTon,
             $formatoCarga,
-            0
+            0,
+            $cita->tipo_vehiculo ?? null
         );
 
         DB::table('appointments')->where('id', $id)->update([
@@ -2685,5 +3143,334 @@ class CitaController extends Controller
         }
 
         return 'KARYNELL ARAQUE';
+    }
+
+    /**
+     * Vista principal del Calendario para Compradores y Administración
+     */
+    public function vistaCalendario()
+    {
+        return \Inertia\Inertia::render('Calendario');
+    }
+
+    /**
+     * API que provee la data completa del calendario para un día específico
+     * Incluye citas agendadas, timeline de slots por muelle, horas disponibles y resumen semanal.
+     */
+    public function calendarioDia(Request $request)
+    {
+        $fechaInput = $request->input('fecha');
+        $timezone = 'America/Caracas';
+        $carbonHoy = Carbon::today($timezone);
+        
+        if (!$fechaInput || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaInput)) {
+            $fecha = $carbonHoy->format('Y-m-d');
+            $carbonFecha = $carbonHoy->copy();
+        } else {
+            $fecha = $fechaInput;
+            $carbonFecha = Carbon::parse($fecha, $timezone);
+        }
+
+        $esHoy = $carbonFecha->isSameDay($carbonHoy);
+        $esManana = $carbonFecha->isSameDay($carbonHoy->copy()->addDay());
+        $esAyer = $carbonFecha->isSameDay($carbonHoy->copy()->subDay());
+
+        $diasSemana = [
+            0 => 'Domingo',
+            1 => 'Lunes',
+            2 => 'Martes',
+            3 => 'Miércoles',
+            4 => 'Jueves',
+            5 => 'Viernes',
+            6 => 'Sábado'
+        ];
+        $meses = [
+            1 => 'Enero', 2 => 'Febrero', 3 => 'Marzo', 4 => 'Abril',
+            5 => 'Mayo', 6 => 'Junio', 7 => 'Julio', 8 => 'Agosto',
+            9 => 'Septiembre', 10 => 'Octubre', 11 => 'Noviembre', 12 => 'Diciembre'
+        ];
+
+        $diaSemanaNum = $carbonFecha->dayOfWeek;
+        $diaTexto = $diasSemana[$diaSemanaNum] ?? '';
+        $mesTexto = $meses[$carbonFecha->month] ?? '';
+        $fechaFormateada = "{$diaTexto}, {$carbonFecha->day} de {$mesTexto} de {$carbonFecha->year}";
+
+        // Configuración de muelles activos
+        $muellesConfig = [
+            '0101' => [
+                'codigo' => '0101',
+                'nombre' => 'Muelle 0101 - Piso de Venta',
+                'nombre_corto' => 'Muelle 0101 (Piso)',
+                'sucursal' => 'Hiper Suraki',
+                'tipo' => 'secos',
+                'badge_color' => 'blue'
+            ],
+            '0102' => [
+                'codigo' => '0102',
+                'nombre' => 'Muelle 0102 - Depósito General',
+                'nombre_corto' => 'Muelle 0102 (Depósito)',
+                'sucursal' => 'Hiper Suraki',
+                'tipo' => 'secos',
+                'badge_color' => 'amber'
+            ],
+            '0140' => [
+                'codigo' => '0140',
+                'nombre' => 'Muelle 0140 - Carnes y Aves',
+                'nombre_corto' => 'Muelle 0140 (Carnes)',
+                'sucursal' => 'Hiper Suraki',
+                'tipo' => 'perecederos',
+                'badge_color' => 'rose'
+            ],
+            '0141' => [
+                'codigo' => '0141',
+                'nombre' => 'Muelle 0141 - Charcutería y Lácteos',
+                'nombre_corto' => 'Muelle 0141 (Charcutería)',
+                'sucursal' => 'Hiper Suraki',
+                'tipo' => 'perecederos',
+                'badge_color' => 'purple'
+            ],
+            '0180' => [
+                'codigo' => '0180',
+                'nombre' => '0180 - Galpón Central',
+                'nombre_corto' => 'Galpón Central (0180)',
+                'sucursal' => 'Galpón Central (Av. Andrés Bello)',
+                'tipo' => 'secos',
+                'badge_color' => 'indigo'
+            ],
+        ];
+
+        // Citas del día seleccionado
+        $citasRaw = DB::table('appointments')
+            ->leftJoin('proveedor_contactos', 'appointments.contacto_id', '=', 'proveedor_contactos.id')
+            ->whereDate('appointments.fecha_cita', $fecha)
+            ->whereNotIn('appointments.estatus', ['cancelada', 'anulada'])
+            ->select(
+                'appointments.*',
+                'proveedor_contactos.nombre as vendedor_nombre',
+                'proveedor_contactos.telefono as vendedor_telefono'
+            )
+            ->orderBy('appointments.fecha_cita', 'asc')
+            ->get();
+
+        $formatearDuracion = function($mins) {
+            $m = (int)$mins;
+            if ($m <= 0) return '0 min';
+            $h = floor($m / 60);
+            $r = $m % 60;
+            if ($h > 0 && $r > 0) return "{$h}h {$r}m";
+            if ($h > 0) return "{$h} " . ($h === 1 ? 'hora' : 'horas');
+            return "{$r} min";
+        };
+
+        $citas = [];
+        foreach ($citasRaw as $c) {
+            $inicio = Carbon::parse($c->fecha_cita, $timezone);
+            $durMin = (int)($c->duracion_minutos ?: 60);
+            $fin = $inicio->copy()->addMinutes($durMin);
+
+            $mAsignado = trim((string)$c->muelle_asignado);
+            if (in_array($mAsignado, ['01', '02', '03', '04', '0180'])) {
+                $mAsignado = '0180';
+            }
+
+            $citas[] = [
+                'id' => $c->id,
+                'numero_oc' => $c->numero_oc,
+                'proveedor' => $c->proveedor,
+                'rif_proveedor' => $c->rif_proveedor,
+                'fecha_cita' => $c->fecha_cita,
+                'hora_inicio' => $inicio->format('H:i'),
+                'hora_inicio_12' => $inicio->format('g:i A'),
+                'hora_fin' => $fin->format('H:i'),
+                'hora_fin_12' => $fin->format('g:i A'),
+                'duracion_minutos' => $durMin,
+                'duracion_texto' => $formatearDuracion($durMin),
+                'rango_texto' => $inicio->format('g:i A') . ' a ' . $fin->format('g:i A') . ' (' . $formatearDuracion($durMin) . ')',
+                'muelle_asignado' => $mAsignado,
+                'muelle_nombre' => $muellesConfig[$mAsignado]['nombre'] ?? "Muelle {$mAsignado}",
+                'estatus' => $c->estatus,
+                'tipo_mercancia' => $c->tipo_mercancia ?: 'secos',
+                'numero_factura' => $c->numero_factura,
+                'factura_url' => $c->factura_path ? \Illuminate\Support\Facades\Storage::url($c->factura_path) : null,
+                'vendedor_nombre' => $c->vendedor_nombre,
+                'vendedor_telefono' => $c->vendedor_telefono,
+                'es_traslado_interno' => (bool)$c->es_traslado_interno,
+                'galpon_origen' => $c->galpon_origen,
+                'observaciones' => $c->observaciones,
+                'created_at' => $c->created_at,
+            ];
+        }
+
+        // Generar timeline de 08:00 a 18:00 (bloques de 30 minutos)
+        $slotsTimeline = [];
+        $esSabado = ($diaSemanaNum === Carbon::SATURDAY);
+        $esMiercoles = ($diaSemanaNum === Carbon::WEDNESDAY);
+        $esDomingo = ($diaSemanaNum === Carbon::SUNDAY);
+
+        for ($h = 8; $h < 18; $h++) {
+            for ($m = 0; $m < 60; $m += 30) {
+                $slotStr = sprintf('%02d:%02d', $h, $m);
+                $slotDt = Carbon::parse("{$fecha} {$slotStr}", $timezone);
+
+                $muellesSlot = [];
+                foreach ($muellesConfig as $mCod => $mCfg) {
+                    $citaOcupando = null;
+                    $esPrimerSlot = false;
+                    $slotsDuracion = 1;
+
+                    foreach ($citas as $c) {
+                        if ($c['muelle_asignado'] === $mCod) {
+                            $cIni = Carbon::parse($c['fecha_cita'], $timezone);
+                            $cFin = $cIni->copy()->addMinutes($c['duracion_minutos']);
+
+                            if ($slotDt->gte($cIni) && $slotDt->lt($cFin)) {
+                                $citaOcupando = $c;
+                                $esPrimerSlot = ($slotDt->format('H:i') === $cIni->format('H:i'));
+                                $slotsDuracion = max(1, ceil($c['duracion_minutos'] / 30));
+                                break;
+                            }
+                        }
+                    }
+
+                    $bloqueado = false;
+                    $motivoBloqueo = null;
+                    $esPasado = ($carbonFecha->lt($carbonHoy) || ($esHoy && $slotDt->lte(Carbon::now($timezone))));
+
+                    if (!$citaOcupando) {
+                        if ($esPasado) {
+                            $bloqueado = true;
+                            $motivoBloqueo = 'Horario ya transcurrido (tiempo pasado)';
+                        } elseif ($esDomingo) {
+                            $bloqueado = true;
+                            $motivoBloqueo = 'Domingo no laborable';
+                        } elseif ($esSabado) {
+                            $bloqueado = true;
+                            $motivoBloqueo = 'Sábados sin recepción de proveedores';
+                        } elseif ($esMiercoles && $h >= 11 && $mCod !== '0180') {
+                            $bloqueado = true;
+                            $motivoBloqueo = 'Miércoles después de 11 AM reservado para traslados/operaciones internas';
+                        }
+                    }
+
+                    $muellesSlot[$mCod] = [
+                        'muelle' => $mCod,
+                        'ocupado' => !empty($citaOcupando),
+                        'disponible' => empty($citaOcupando) && !$bloqueado,
+                        'bloqueado' => $bloqueado,
+                        'pasado' => $esPasado,
+                        'motivo_bloqueo' => $motivoBloqueo,
+                        'cita' => $citaOcupando,
+                        'es_primer_slot' => $esPrimerSlot,
+                        'slots_duracion' => $slotsDuracion,
+                    ];
+                }
+
+                $slotsTimeline[] = [
+                    'hora' => $slotStr,
+                    'hora_12' => $slotDt->format('g:i A'),
+                    'muelles' => $muellesSlot,
+                ];
+            }
+        }
+
+        // Calcular KPIs
+        $totalCitasDia = count($citas);
+        $totalSlotsOcupados = 0;
+        $totalSlotsDisponibles = 0;
+        $totalSlotsTotales = count($slotsTimeline) * count($muellesConfig);
+
+        foreach ($slotsTimeline as $st) {
+            foreach ($st['muelles'] as $ms) {
+                if ($ms['ocupado']) $totalSlotsOcupados++;
+                if ($ms['disponible']) $totalSlotsDisponibles++;
+            }
+        }
+
+        $tasaOcupacion = $totalSlotsTotales > 0 
+            ? round(($totalSlotsOcupados / $totalSlotsTotales) * 100, 1) 
+            : 0;
+
+        // Horas disponibles agrupadas por muelle (rangos legibles)
+        $horasDisponiblesResumen = [];
+        foreach ($muellesConfig as $mCod => $mCfg) {
+            $bloques = [];
+            $enRango = false;
+            $rangoInicio = null;
+            $rangoFin = null;
+
+            foreach ($slotsTimeline as $st) {
+                $info = $st['muelles'][$mCod];
+                if ($info['disponible']) {
+                    if (!$enRango) {
+                        $enRango = true;
+                        $rangoInicio = $st['hora_12'];
+                    }
+                    $rangoFin = Carbon::parse("{$fecha} {$st['hora']}", $timezone)->addMinutes(30)->format('g:i A');
+                } else {
+                    if ($enRango) {
+                        $bloques[] = "{$rangoInicio} a {$rangoFin}";
+                        $enRango = false;
+                    }
+                }
+            }
+            if ($enRango) {
+                $bloques[] = "{$rangoInicio} a {$rangoFin}";
+            }
+            $horasDisponiblesResumen[$mCod] = [
+                'muelle_codigo' => $mCod,
+                'muelle_nombre' => $mCfg['nombre'],
+                'nombre_corto' => $mCfg['nombre_corto'],
+                'sucursal' => $mCfg['sucursal'],
+                'bloques_libres' => $bloques,
+                'total_bloques' => count($bloques),
+            ];
+        }
+
+        // Resumen de la semana (los 7 días de la semana de la fecha consultada)
+        $diasCortos = [0 => 'Dom', 1 => 'Lun', 2 => 'Mar', 3 => 'Mié', 4 => 'Jue', 5 => 'Vie', 6 => 'Sáb'];
+        $mesesCortos = [1 => 'Ene', 2 => 'Feb', 3 => 'Mar', 4 => 'Abr', 5 => 'May', 6 => 'Jun', 7 => 'Jul', 8 => 'Ago', 9 => 'Sep', 10 => 'Oct', 11 => 'Nov', 12 => 'Dic'];
+
+        $inicioSemana = $carbonFecha->copy()->startOfWeek();
+        $resumenSemana = [];
+        for ($i = 0; $i < 7; $i++) {
+            $diaLoop = $inicioSemana->copy()->addDays($i);
+            $dStr = $diaLoop->format('Y-m-d');
+            $citasCount = DB::table('appointments')
+                ->whereDate('fecha_cita', $dStr)
+                ->whereNotIn('estatus', ['cancelada', 'anulada'])
+                ->count();
+
+            $resumenSemana[] = [
+                'fecha' => $dStr,
+                'dia_nombre' => $diasSemana[$diaLoop->dayOfWeek] ?? '',
+                'dia_corto' => $diasCortos[$diaLoop->dayOfWeek] ?? '',
+                'numero_dia' => $diaLoop->day,
+                'mes_corto' => $mesesCortos[$diaLoop->month] ?? '',
+                'total_citas' => $citasCount,
+                'es_hoy' => $diaLoop->isSameDay($carbonHoy),
+                'es_manana' => $diaLoop->isSameDay($carbonHoy->copy()->addDay()),
+                'es_seleccionado' => ($dStr === $fecha),
+            ];
+        }
+
+        return response()->json([
+            'status' => 'Exitoso',
+            'fecha' => $fecha,
+            'fecha_formateada' => $fechaFormateada,
+            'es_hoy' => $esHoy,
+            'es_manana' => $esManana,
+            'es_ayer' => $esAyer,
+            'kpis' => [
+                'total_citas' => $totalCitasDia,
+                'total_horas_ocupadas' => round($totalSlotsOcupados * 0.5, 1),
+                'total_horas_disponibles' => round($totalSlotsDisponibles * 0.5, 1),
+                'tasa_ocupacion' => $tasaOcupacion,
+            ],
+            'muelles_config' => array_values($muellesConfig),
+            'citas' => $citas,
+            'timeline' => $slotsTimeline,
+            'horas_disponibles_resumen' => array_values($horasDisponiblesResumen),
+            'resumen_semana' => $resumenSemana,
+        ]);
     }
 }

@@ -13,6 +13,7 @@ const esSuperAdmin = computed(() => currentUser.value && (currentUser.value.id =
 const MODULOS_SISTEMA = [
     { key: 'recepcion', label: 'Recepción (Andén / Citas)', icon: '📥', desc: 'Acceso a la recepción de mercancía y tablero de citas' },
     { key: 'monitor_odc', label: 'Monitor ODC', icon: '📋', desc: 'Consulta y seguimiento de órdenes de compra' },
+    { key: 'calendario', label: 'Calendario & Horas Libres', icon: '🗓️', desc: 'Cronograma de citas por muelles y disponibilidad horaria' },
     { key: 'operarios', label: 'Operarios', icon: '👷', desc: 'Gestión y asignación de operarios de almacén' },
     { key: 'reservar_cita', label: 'Reservar Cita', icon: '📅', desc: 'Agendamiento y reprogramación de citas' },
     { key: 'monitoreo', label: 'Monitoreo & Auditoría', icon: '📊', desc: 'Trazabilidad, logs y reportes del sistema' },
@@ -204,9 +205,9 @@ const abrirModalEditar = (u) => {
         if (u.role === 'admin') {
             mods = MODULOS_SISTEMA.map(m => m.key);
         } else if (u.role === 'receptor') {
-            mods = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'];
+            mods = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'];
         } else if (u.role === 'comprador') {
-            mods = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'];
+            mods = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'];
         } else if (u.role === 'proveedor') {
             mods = ['recepcion', 'reservar_cita'];
         }
@@ -236,9 +237,9 @@ const abrirModalModulos = (u) => {
         if (u.role === 'admin') {
             mods = MODULOS_SISTEMA.map(m => m.key);
         } else if (u.role === 'receptor') {
-            mods = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'];
+            mods = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'];
         } else if (u.role === 'comprador') {
-            mods = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'];
+            mods = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'];
         } else if (u.role === 'proveedor') {
             mods = ['recepcion', 'reservar_cita'];
         }
@@ -283,8 +284,8 @@ const desmarcarTodosModulosEditar = () => {
 const restaurarModulosPorRolEditar = () => {
     const r = formEditar.value.role;
     if (r === 'admin') formEditar.value.modulos_permitidos = MODULOS_SISTEMA.map(m => m.key);
-    else if (r === 'receptor') formEditar.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'];
-    else if (r === 'comprador') formEditar.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'];
+    else if (r === 'receptor') formEditar.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'];
+    else if (r === 'comprador') formEditar.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'];
     else if (r === 'proveedor') formEditar.value.modulos_permitidos = ['recepcion', 'reservar_cita'];
 };
 
@@ -299,8 +300,8 @@ const desmarcarTodosModulosRapido = () => {
 const restaurarModulosPorRolRapido = () => {
     const r = formModulos.value.role;
     if (r === 'admin') formModulos.value.modulos_permitidos = MODULOS_SISTEMA.map(m => m.key);
-    else if (r === 'receptor') formModulos.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'];
-    else if (r === 'comprador') formModulos.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'];
+    else if (r === 'receptor') formModulos.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'];
+    else if (r === 'comprador') formModulos.value.modulos_permitidos = ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'];
     else if (r === 'proveedor') formModulos.value.modulos_permitidos = ['recepcion', 'reservar_cita'];
 };
 

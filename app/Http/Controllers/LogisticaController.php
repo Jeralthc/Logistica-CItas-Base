@@ -61,10 +61,10 @@ class LogisticaController extends Controller
                     )) AS Email_Proveedor,
                     PROV.c_telefono AS Telefono_Proveedor,
                     COUNT(TR_ODC.c_CODARTICULO) as cant_productos,
-                    
-                    -- Bultos para Secos
+                                        -- Bultos para Secos (incluye mercancía seca y productos UHT no refrigerados de dpto 15)
                     SUM(CASE 
-                        WHEN MA_PRODUCTOS.c_departamento NOT IN ('14', '10', '11', '12', '13', '15', '21', '23') 
+                        WHEN MA_PRODUCTOS.c_departamento NOT IN ('14', '10', '11', '12', '13', '21', '23') 
+                             AND NOT (MA_PRODUCTOS.c_departamento = '15' AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))
                         THEN CAST(TR_ODC.n_CANTIDAD / NULLIF(MA_PRODUCTOS.n_cantibul, 0) AS DECIMAL(18, 2)) 
                         ELSE 0 
                     END) AS total_bultos,
@@ -75,9 +75,10 @@ class LogisticaController extends Controller
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '03' THEN CAST(TR_ODC.n_CANTIDAD / NULLIF(MA_PRODUCTOS.n_cantibul, 0) AS DECIMAL(18, 2)) ELSE 0 END) AS total_bultos_limpieza,
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '04' THEN CAST(TR_ODC.n_CANTIDAD / NULLIF(MA_PRODUCTOS.n_cantibul, 0) AS DECIMAL(18, 2)) ELSE 0 END) AS total_bultos_licor_bebidas,
                     
-                    -- KG para Perecederos y Fruver
+                    -- KG para Perecederos y Fruver (refrigerados/congelados reales)
                     SUM(CASE 
-                        WHEN MA_PRODUCTOS.c_departamento IN ('10', '11', '12', '13', '15', '21', '23') 
+                        WHEN MA_PRODUCTOS.c_departamento IN ('10', '11', '12', '13', '21', '23') 
+                             OR (MA_PRODUCTOS.c_departamento = '15' AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))
                              OR (MA_PRODUCTOS.c_departamento = '14' AND MA_PRODUCTOS.c_presenta = 'KG')
                         THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) 
                         ELSE 0 
@@ -104,19 +105,27 @@ class LogisticaController extends Controller
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '11' AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_carnes,
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '11' AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_carnes,
                     
-                    SUM(CASE WHEN (MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%'))) AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_charcuteria,
-                    SUM(CASE WHEN (MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%'))) AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_charcuteria,
+                    SUM(CASE WHEN (MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))) AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_charcuteria,
+                    SUM(CASE WHEN (MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))) AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_charcuteria,
                     
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '13' AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_pescaderia,
                     SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '13' AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_pescaderia,
                     
-                    SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_congelados,
-                    SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_congelados,
+                    SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518') AND MA_PRODUCTOS.c_presenta = 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_kg_congelados,
+                    SUM(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518') AND MA_PRODUCTOS.c_presenta <> 'KG' THEN CAST(TR_ODC.n_CANTIDAD AS DECIMAL(18, 2)) ELSE 0 END) AS total_und_congelados,
 
                     -- Banderas de categoría
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '14' THEN 1 ELSE 0 END) AS es_fruver,
-                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento IN ('10', '11', '12', '13', '15', '23') THEN 1 ELSE 0 END) AS es_perecederos,
-                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento NOT IN ('14', '10', '11', '12', '13', '15', '23') THEN 1 ELSE 0 END) AS es_secos,
+                    MAX(CASE 
+                        WHEN MA_PRODUCTOS.c_departamento IN ('10', '11', '12', '13', '21', '23') 
+                             OR (MA_PRODUCTOS.c_departamento = '15' AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))
+                        THEN 1 ELSE 0 
+                    END) AS es_perecederos,
+                    MAX(CASE 
+                        WHEN MA_PRODUCTOS.c_departamento NOT IN ('14', '10', '11', '12', '13', '21', '23') 
+                             AND NOT (MA_PRODUCTOS.c_departamento = '15' AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518'))
+                        THEN 1 ELSE 0 
+                    END) AS es_secos,
 
                     -- Sub-banderas Fruver
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '14' AND (MA_SUBGRUPOS.C_DESCRIPCIO LIKE '%HORTALIZA%' OR MA_PRODUCTOS.c_descri LIKE '%BROCOLI%' OR MA_PRODUCTOS.c_descri LIKE '%CELERY%' OR MA_PRODUCTOS.c_descri LIKE '%ZANAHORIA%') THEN 1 ELSE 0 END) AS es_hortaliza,
@@ -125,9 +134,9 @@ class LogisticaController extends Controller
 
                     -- Sub-banderas Perecederos (Fase 5)
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '11' THEN 1 ELSE 0 END) AS es_carnes,
-                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%')) THEN 1 ELSE 0 END) AS es_charcuteria,
+                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento IN ('10', '12') OR (MA_PRODUCTOS.c_departamento = '15' AND (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518')) THEN 1 ELSE 0 END) AS es_charcuteria,
                     MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '13' THEN 1 ELSE 0 END) AS es_pescaderia,
-                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') THEN 1 ELSE 0 END) AS es_congelados
+                    MAX(CASE WHEN MA_PRODUCTOS.c_departamento = '15' AND NOT (MA_GRUPOS.C_DESCRIPCIO LIKE '%LACTEA%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%LECHE%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%QUESO%' OR MA_GRUPOS.C_DESCRIPCIO LIKE '%YOGURT%') AND MA_PRODUCTOS.c_grupo NOT IN ('1505', '1506', '1507', '1508', '1509', '1517', '1518') THEN 1 ELSE 0 END) AS es_congelados
                 FROM MA_ODC WITH (NOLOCK)
                 INNER JOIN TR_ODC WITH (NOLOCK) ON MA_ODC.c_DOCUMENTO = TR_ODC.c_DOCUMENTO 
                 INNER JOIN MA_PRODUCTOS WITH (NOLOCK) ON TR_ODC.c_CODARTICULO = MA_PRODUCTOS.C_CODIGO
@@ -150,7 +159,7 @@ class LogisticaController extends Controller
             
             $citasFacturas = DB::table('appointments')
                 ->whereNotIn('estatus', ['cancelada', 'anulada'])
-                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at'])
+                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at', 'fecha_cita', 'duracion_minutos'])
                 ->keyBy('numero_oc');
 
             $allOcs = array_map(fn($o) => trim($o->numero_oc ?? ''), $ordenes);
@@ -192,6 +201,8 @@ class LogisticaController extends Controller
                 }
                 $o->fecha_envio_comprador = $fEnvio;
                 $o->fecha_registro_cita = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->created_at : null;
+                $o->fecha_cita = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->fecha_cita : null;
+                $o->duracion_minutos = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->duracion_minutos : null;
             }
 
             $authUser = auth('web')->user() ?: request()->user();
@@ -310,7 +321,7 @@ class LogisticaController extends Controller
             
             $citasFacturas = DB::table('appointments')
                 ->whereNotIn('estatus', ['cancelada', 'anulada'])
-                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at', 'updated_at', 'estatus', 'fecha_completada', 'completada_por_nombre'])
+                ->get(['numero_oc', 'numero_factura', 'factura_path', 'created_at', 'updated_at', 'estatus', 'fecha_completada', 'completada_por_nombre', 'fecha_cita', 'duracion_minutos'])
                 ->keyBy('numero_oc');
 
             $emailLogs = DB::table('email_logs')
@@ -340,6 +351,8 @@ class LogisticaController extends Controller
                     $obj['factura_url'] = (isset($citasFacturas[$numOc]) && $citasFacturas[$numOc]->factura_path)
                         ? \Illuminate\Support\Facades\Storage::url($citasFacturas[$numOc]->factura_path)
                         : null;
+                    $obj['fecha_cita'] = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->fecha_cita : null;
+                    $obj['duracion_minutos'] = isset($citasFacturas[$numOc]) ? $citasFacturas[$numOc]->duracion_minutos : null;
                     
                     $posiblesNum = array_values(array_unique(array_filter([
                         $numOc,
@@ -525,6 +538,12 @@ class LogisticaController extends Controller
                             break;
                         }
                     }
+                }
+
+                // Redirigir a muelles de cavas si es perecedero/fruver y tiene destino 0101 o 0102 en ERP
+                if ($esPerecederoOFruver && in_array($destino, ['0101', '0102', '0103', ''])) {
+                    $totalCarnes = (float)($resumen['Total_KG_Carnes'] ?? 0) + (float)($resumen['Total_KG_Pescaderia'] ?? 0) + (float)($resumen['Total_KG_Congelados'] ?? 0);
+                    $destino = ($totalCarnes > 0) ? '0140' : '0141';
                 }
 
                 // Sedes o depósitos de tiendas que no reciben agendamiento de proveedores en muelle central
@@ -899,6 +918,7 @@ class LogisticaController extends Controller
                     D.n_COSTO AS costo_unitario,
                     D.n_subtotal AS subtotal,
                     P.c_departamento,
+                    P.c_grupo,
                     P.c_presenta,
                     G.C_DESCRIPCIO as grupo_nombre,
                     S.C_DESCRIPCIO as subgrupo_nombre,
@@ -918,9 +938,14 @@ class LogisticaController extends Controller
 
             $destinoReal = trim($odcData[0]->Muelle_Destino ?? '0101');
             $dptosPerecederosFruver = ['10', '11', '12', '13', '14', '15', '21', '23'];
+            $gruposUhtSecos = ['1505', '1506', '1507', '1508', '1509', '1517', '1518'];
             $esPerecederoOFruver = false;
             foreach ($detalles as $item) {
                 $dpto = trim($item->c_departamento ?? '');
+                $cGrupo = trim($item->c_grupo ?? '');
+                if ($dpto === '15' && in_array($cGrupo, $gruposUhtSecos)) {
+                    continue; // UHT / Larga duración seco, no cava
+                }
                 if (in_array($dpto, $dptosPerecederosFruver)) {
                     $esPerecederoOFruver = true;
                     break;
@@ -973,6 +998,8 @@ class LogisticaController extends Controller
                 $prodNombre = strtoupper($item->producto);
                 $grupo = strtoupper($item->grupo_nombre ?? '');
                 $subgrupo = strtoupper($item->subgrupo_nombre ?? '');
+                $cGrupo = trim($item->c_grupo ?? '');
+                $esUhtSeco = ($dpto === '15' && in_array($cGrupo, $gruposUhtSecos));
                 
                 // Clasificación FRUVER Avanzada (Fase 4)
                 if ($dpto === '14') {
@@ -1015,7 +1042,7 @@ class LogisticaController extends Controller
                         $totalFruverBultos += ((float)$item->bultos > 0) ? (float)$item->bultos : ((float)$item->cantidad_unidades / 24);
                     }
 
-                } elseif (in_array($dpto, $dptosPerecederos)) {
+                } elseif (in_array($dpto, $dptosPerecederos) && !$esUhtSeco) {
                     $totalKgPerecederos += (float)$item->cantidad_unidades;
                     
                     // Clasificación PERECEDEROS Avanzada (Fase 5)
@@ -1115,6 +1142,27 @@ class LogisticaController extends Controller
             $datosResumen['Total_KG_Hortalizas'] = round($totalKgHortalizas, 2);
             $datosResumen['Total_UND_Hortalizas'] = round($totalUndHortalizas);
             $datosResumen['Ciclos_Necesarios'] = $ciclos;
+
+            $totalKgFruver = $totalKgFrutas + $totalKgVerduras + $totalKgHortalizas;
+            $totalUndFruver = $totalUndFrutas + $totalUndVerduras + $totalUndHortalizas;
+            $esFruverReal = ($totalKgFruver + $totalUndFruver > 0);
+            $esPerecederoReal = ($totalKgPerecederos > 0) || $esPerecederoOFruver;
+
+            // Si es Perecederos o Fruver, redirigir el muelle a Cavas para no bloquear el muelle seco 0102 de proveedores
+            if ($esPerecederoReal || $esFruverReal) {
+                if (in_array($destinoReal, ['0101', '0102', '0103']) || empty($destinoReal)) {
+                    $totalCarnes = ($totalKgCarnes + $totalUndCarnes + $totalKgPescaderia + $totalKgCongelados);
+                    $destinoReal = ($totalCarnes > 0) ? '0140' : '0141';
+                }
+            }
+
+            $datosResumen['Muelle_Destino'] = $destinoReal;
+            $datosResumen['destino'] = $destinoReal;
+            $datosResumen['total_bultos'] = round($totalCajas, 2);
+            $datosResumen['total_kg'] = round($totalKgPerecederos + $totalKgFruver, 2);
+            $datosResumen['es_fruver'] = $esFruverReal ? 1 : 0;
+            $datosResumen['es_perecederos'] = $esPerecederoReal ? 1 : 0;
+            $datosResumen['es_secos'] = (!$esFruverReal && !$esPerecederoReal) ? 1 : 0;
 
             // 6. Obtener operarios disponibles para cálculo óptimo
             $receptoresDisponibles = Operario::where('tipo', 'receptor')->where('disponible', true)->count();

@@ -21,10 +21,12 @@ class AppointmentDurationService
         $categoria = null,
         float $pesoToneladas = 0,
         string $formatoCarga = 'suelta',
-        int $tiempoAdicional = 0
+        int $tiempoAdicional = 0,
+        ?string $tipoVehiculo = null,
+        ?string $proveedor = null
     ): int {
-        // Valores por defecto
-        $tFijo = 20;
+        // Valores por defecto (Tiempo fijo aumentado a 35 min de maniobra, verificación y apertura)
+        $tFijo = 35;
         $vDescarga = 0.06;
         $categoriaId = null;
 
@@ -59,14 +61,75 @@ class AppointmentDurationService
             $vDescarga = $cat->velocidad_descarga;
             $categoriaId = $cat->id;
         } else {
-            Log::warning("AppointmentDurationService: Categoría no encontrada o no proporcionada. Usando fallback.");
+            Log::warning("AppointmentDurationService: Categoría no encontrada o no proporcionada. Usando fallback de 35 min fijo.");
         }
 
         $tiempoDescarga = $vDescarga > 0 ? ($pesoToneladas / $vDescarga) : 0;
-        $total = (int) ceil($tFijo + $tiempoDescarga + $tiempoAdicional);
+        $totalCalculado = (int) ceil($tFijo + $tiempoDescarga + $tiempoAdicional);
 
-        // Regla operativa: Una cita individual nunca debe durar menos de 30 minutos ni exceder 240 minutos (4 horas máximas)
-        return min(240, max(30, $total));
+        // Matriz de Pisos Mínimos de Seguridad por Tipo de Vehículo (minutos)
+        // Protege al andén del volumen físico independientemente de que el peso registrado sea bajo
+        $pisosVehiculo = [
+            'minivan' => 45,
+            'camioneta_panel' => 45,
+            'cava_pequena' => 60,
+            'camion_350' => 60,
+            'camion_600' => 60,
+            'camion_750' => 75,
+            'camion_liviano' => 75,   // NPR / FVR
+            'camion_mediano' => 90,   // NQR / Cargo 815
+            'camion_sencillo' => 105, // Camión Rígido Pesado
+            'camion_toronto' => 120,  // Balancín
+            'gandola_furgon' => 150,  // Furgón 48-53 pies
+            'gandola_sider' => 135,   // Sider
+        ];
+
+        // 1. Piso Mínimo General del Sistema (45 minutos para permitir recepciones rápidas pero evitar huecos insuficientes)
+        $pisoGeneral = 45;
+
+        // 2. Piso Mínimo por Categoría de Alto Volumen
+        $catNombreStr = $cat ? $cat->nombre : (string)$categoria;
+        $esCategoriaVolumen = str_contains($catNombreStr, 'Desechables') 
+            || str_contains($catNombreStr, 'Papel') 
+            || str_contains($catNombreStr, 'Golosinas') 
+            || str_contains($catNombreStr, 'Confites') 
+            || str_contains($catNombreStr, 'Papeleria') 
+            || str_contains($catNombreStr, 'Jugueteria');
+
+        // 3. Piso Mínimo por Proveedores Críticos de Alto Volumen (Bolsas, Panadería, Chucherías, Higiene, Absorbentes)
+        $esProveedorVolumen = false;
+        if ($proveedor) {
+            $provUpper = mb_strtoupper($proveedor);
+            $palabrasClave = [
+                'PAVECA', 'PAPELES VENEZOLANOS', 'PAPELES LATINOS', 'CARICIAS', 'MULTIPLAST',
+                'SUPLIALIMENTOS', 'PEPSICO', 'FRITO LAY', 'MUNCHY', 'RUPLI', 'KRON', 'ST. MORITZ', 'ST MORITZ',
+                'DIMEPACA', 'BIMBO', 'HOLSUM', 'CANAIMA SUPPLY', 'MIGAS ARTESANOS', 'PRATO VICUÑA', 'PRATO',
+                'PHARSANA', 'MIMLOT', 'INDUSTRIAS JAI', 'EUROJUPITER', 'COLETOMAN', 'ALVAREZ ARELLANO',
+                'PALMA', 'FISA', 'ETERNA', 'BOLSALITO', 'LERIS ESCOBAR', 'VAN-GAT', 'BLINDAC', 'MOCASA'
+            ];
+            foreach ($palabrasClave as $p) {
+                if (str_contains($provUpper, $p)) {
+                    $esProveedorVolumen = true;
+                    break;
+                }
+            }
+        }
+
+        // Si pertenece a la categoría de alto volumen o a la lista de proveedores de volumen, piso mínimo = 60 min (1 hora)
+        $pisoVolumen = ($esCategoriaVolumen || $esProveedorVolumen) ? 60 : 0;
+
+        // 4. Piso de Vehículo
+        $pisoVehiculo = 0;
+        if ($tipoVehiculo && isset($pisosVehiculo[$tipoVehiculo])) {
+            $pisoVehiculo = strtolower($formatoCarga) === 'paletizada'
+                ? min(90, (int)($pisosVehiculo[$tipoVehiculo] * 0.7))
+                : $pisosVehiculo[$tipoVehiculo];
+        }
+
+        $duracionFinal = max($pisoGeneral, $pisoVolumen, $pisoVehiculo, $totalCalculado);
+
+        // Regla operativa: Una cita individual nunca debe exceder 240 minutos (4 horas máximas)
+        return min(240, $duracionFinal);
     }
 
     /**
@@ -74,14 +137,46 @@ class AppointmentDurationService
      */
     public static function detectarCategoria(array $resumenErp): string
     {
-        // El ERP Sync devuelve banderas 1 o 0
-        if (!empty($resumenErp['es_fruver']) && $resumenErp['es_fruver'] == 1) {
+        $destino = trim((string)($resumenErp['Muelle_Destino'] ?? $resumenErp['destino'] ?? $resumenErp['muelle_asignado'] ?? ''));
+
+        // 1. Detectar Fruver (Frutas, Verduras, Hortalizas)
+        $totalKgFruver = (float)($resumenErp['Total_KG_Frutas'] ?? $resumenErp['total_kg_frutas'] ?? 0)
+                       + (float)($resumenErp['Total_KG_Verduras'] ?? $resumenErp['total_kg_verduras'] ?? 0)
+                       + (float)($resumenErp['Total_KG_Hortalizas'] ?? $resumenErp['total_kg_hortalizas'] ?? 0);
+        $totalUndFruver = (float)($resumenErp['Total_UND_Frutas'] ?? $resumenErp['total_und_frutas'] ?? 0)
+                        + (float)($resumenErp['Total_UND_Verduras'] ?? $resumenErp['total_und_verduras'] ?? 0)
+                        + (float)($resumenErp['Total_UND_Hortalizas'] ?? $resumenErp['total_und_hortalizas'] ?? 0);
+
+        if (!empty($resumenErp['es_fruver']) && $resumenErp['es_fruver'] == 1 || ($totalKgFruver + $totalUndFruver > 0)) {
             return 'Perecederos 3 (Frutas y Verduras)';
         }
-        if (!empty($resumenErp['es_perecederos']) && $resumenErp['es_perecederos'] == 1) {
+
+        // 2. Detectar Perecederos (Carnes, Aves, Pescados, Congelados, Charcutería, Lácteos)
+        $totalCarnes = (float)($resumenErp['Total_KG_Carnes'] ?? $resumenErp['total_kg_carnes'] ?? 0)
+                     + (float)($resumenErp['Total_KG_Pescaderia'] ?? $resumenErp['total_kg_pescaderia'] ?? 0)
+                     + (float)($resumenErp['Total_KG_Congelados'] ?? $resumenErp['total_kg_congelados'] ?? 0)
+                     + (float)($resumenErp['Total_UND_Carnes'] ?? $resumenErp['total_und_carnes'] ?? 0)
+                     + (float)($resumenErp['Total_UND_Pescaderia'] ?? $resumenErp['total_und_pescaderia'] ?? 0)
+                     + (float)($resumenErp['Total_UND_Congelados'] ?? $resumenErp['total_und_congelados'] ?? 0);
+
+        $totalKgPerecederos = (float)($resumenErp['total_kg'] ?? $resumenErp['Total_KG_Perecederos'] ?? 0)
+                            + (float)($resumenErp['Total_KG_Charcuteria'] ?? $resumenErp['total_kg_charcuteria'] ?? 0)
+                            + $totalCarnes;
+
+        if (!empty($resumenErp['es_perecederos']) && $resumenErp['es_perecederos'] == 1 || $totalKgPerecederos > 0 || str_starts_with($destino, '014') || str_starts_with($destino, '015')) {
+            if ($totalCarnes > 0) {
+                return 'Perecederos 2 (Carnes)';
+            }
             return 'Perecederos 1 (Charcuteria)';
         }
+
+        // 3. Mercancía Seca (Víveres, No Alimentos, etc.)
         if (!empty($resumenErp['es_secos']) && $resumenErp['es_secos'] == 1) {
+            return 'Alimentos 1 (Viveres)';
+        }
+
+        $totalBultos = (float)($resumenErp['total_bultos'] ?? $resumenErp['Total_Cajas_Fisicas'] ?? 0);
+        if ($totalBultos > 0) {
             return 'Alimentos 1 (Viveres)';
         }
 

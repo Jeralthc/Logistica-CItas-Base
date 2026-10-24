@@ -111,9 +111,9 @@ class User extends Authenticatable
     public static function modulosPorDefecto(?string $role): array
     {
         return match ($role) {
-            'admin' => ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias'],
-            'receptor' => ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita'],
-            'comprador' => ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo'],
+            'admin' => ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias', 'calendario'],
+            'receptor' => ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'calendario'],
+            'comprador' => ['recepcion', 'monitor_odc', 'reservar_cita', 'monitoreo', 'calendario'],
             'proveedor' => ['recepcion', 'reservar_cita'],
             default => ['recepcion'],
         };

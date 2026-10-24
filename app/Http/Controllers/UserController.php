@@ -74,7 +74,7 @@ class UserController extends Controller
         if ($request->has('modulos_permitidos') && (auth()->id() === 1 || auth()->user()?->username === 'Sistemas.Jeralthc')) {
             $modulosInput = $request->input('modulos_permitidos');
             if (is_array($modulosInput)) {
-                $modulosValidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias'];
+                $modulosValidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias', 'calendario'];
                 $userData['modulos_permitidos'] = array_values(array_intersect($modulosInput, $modulosValidos));
             }
         }
@@ -135,7 +135,7 @@ class UserController extends Controller
 
             $modulosInput = $request->input('modulos_permitidos');
             if (is_array($modulosInput)) {
-                $modulosValidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias'];
+                $modulosValidos = ['recepcion', 'monitor_odc', 'operarios', 'reservar_cita', 'monitoreo', 'configuracion_erp', 'despliegue', 'usuarios', 'categorias', 'calendario'];
                 $validated['modulos_permitidos'] = array_values(array_intersect($modulosInput, $modulosValidos));
             } elseif ($modulosInput === null) {
                 $validated['modulos_permitidos'] = null;

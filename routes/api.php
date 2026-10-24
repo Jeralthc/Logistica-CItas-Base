@@ -122,6 +122,7 @@ Route::middleware('web')->group(function () {
             Route::get('/orden-detalles/{orden}', [LogisticaController::class, 'buscarOrden']);
             Route::post('/odc/habilitar', [CitaController::class, 'habilitarOdc']);
             Route::post('/calcular-duracion', [CitaController::class, 'calcularDuracionApi']);
+            Route::get('/calendario/dia', [CitaController::class, 'calendarioDia']);
 
             // Verificación de Productos ODC (Recepción)
             Route::get('/odc/{orden}/verificaciones', [LogisticaController::class, 'obtenerVerificacionesProducto']);

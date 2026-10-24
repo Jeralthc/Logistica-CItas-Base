@@ -91,6 +91,10 @@ Route::get('/monitor-odc', function () {
     return Inertia::render('MonitorOdc');
 })->middleware(['auth', 'verified', 'role:receptor,admin,comprador', 'modulo:monitor_odc'])->name('monitor-odc');
 
+Route::get('/calendario', [\App\Http\Controllers\CitaController::class, 'vistaCalendario'])
+    ->middleware(['auth', 'verified', 'role:receptor,admin,comprador', 'modulo:calendario'])
+    ->name('calendario');
+
 Route::get('/monitoreo', [\App\Http\Controllers\MonitoringController::class, 'index'])
     ->middleware(['auth', 'verified', 'role:admin,comprador', 'modulo:monitoreo'])
     ->name('monitoreo');
@@ -139,6 +143,9 @@ Route::middleware('auth')->group(function () {
 });
 
 Route::get('/instalar-bd', function () {
+    if (!auth()->check() || auth()->user()->role !== 'admin') {
+        abort(403, 'Acceso Denegado');
+    }
     try {
         // SEGURIDAD: Verificar si la base de datos ya fue instalada
         if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
@@ -158,6 +165,9 @@ Route::get('/instalar-bd', function () {
 require __DIR__.'/auth.php';
 
 Route::get('/post-deploy-fase10', function () {
+    if (!auth()->check() || auth()->user()->role !== 'admin') {
+        abort(403, 'Acceso Denegado');
+    }
     try {
         \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
         \Illuminate\Support\Facades\Artisan::call('db:seed', ['--class' => 'CategoriasRendimientoSeeder', '--force' => true]);
@@ -236,8 +246,11 @@ Route::get('/test-odc/{numero_oc}', function ($numero_oc) {
     ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 });
 
-// Ruta pública para restablecer el sistema completo desde el navegador
+// Ruta para restablecer el sistema completo (Estrictamente protegida para rol Admin)
 Route::get('/reset-sistema', function () {
+    if (!auth()->check() || auth()->user()->role !== 'admin') {
+        abort(403, 'Acceso Denegado');
+    }
     try {
         \Illuminate\Support\Facades\Artisan::call('app:reset-sistema');
         $output = \Illuminate\Support\Facades\Artisan::output();
@@ -254,8 +267,11 @@ Route::get('/reset-sistema', function () {
     }
 });
 
-// Ruta para instalar paquete de notificaciones push y generar claves VAPID
+// Ruta para instalar paquete de notificaciones push y generar claves VAPID (Protegida)
 Route::get('/post-deploy-webpush', function () {
+    if (!auth()->check() || auth()->user()->role !== 'admin') {
+        abort(403, 'Acceso Denegado');
+    }
     $outputs = [];
 
     // 1. Ejecutar migraciones pendientes (crea tabla push_subscriptions)
