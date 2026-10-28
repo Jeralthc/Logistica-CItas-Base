@@ -141,7 +141,7 @@ if ($clearResp->successful()) {
 
 // 5. Ejecutar migraciones y seeders en producción
 echo "⚡ 4/4 Ejecutando migraciones y seeders de prueba en producción...\n";
-$migResp = Http::withoutVerifying()->timeout(60)->get('https://citsur.suraki.net/migrar.php?seed=test');
+$migResp = Http::withoutVerifying()->timeout(60)->get('https://citsur.suraki.net/migrar.php');
 if ($migResp->successful() && str_contains($migResp->body(), 'exitosa')) {
     echo "   ✅ Migraciones y TestProviderAndOrdersSeeder ejecutados con éxito en producción!\n";
 } else {

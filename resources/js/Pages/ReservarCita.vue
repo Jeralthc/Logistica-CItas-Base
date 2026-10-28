@@ -330,27 +330,32 @@ const cargarSlots = async () => {
         });
         slotsDisponibles.value = resp.data.slots;
         fechasDisponibles.value = resp.data.fechas_disponibles;
-        if (!fechaSeleccionada.value && resp.data.fechas_disponibles.length > 0) {
-            fechaSeleccionada.value = resp.data.fechas_disponibles[0].fecha;
+        slotsDisponibles.value = resp.data.slots || [];
+        fechasDisponibles.value = resp.data.fechas_disponibles || [];
+
+        // Si aún no hay fecha seleccionada, elegir la primera fecha válida devuelta por el backend
+        if (!fechaSeleccionada.value && fechasDisponibles.value.length > 0) {
+            const tieneLibreHoy = slotsDisponibles.value.some(s => s.disponible);
+            if (!tieneLibreHoy && fechasDisponibles.value.length > 1) {
+                fechaSeleccionada.value = fechasDisponibles.value[1].fecha;
+                return;
+            }
+            fechaSeleccionada.value = fechasDisponibles.value[0].fecha;
             return;
         }
 
-        // Auto-avanzar si todo está full
-        if (fechaSeleccionada.value && slotsDisponibles.value.length > 0) {
-            const tieneLibre = slotsDisponibles.value.some(s => s.disponible);
-            if (!tieneLibre && maxIntentosBusqueda.value < 14) {
-                maxIntentosBusqueda.value++;
-                const d = new Date(fechaSeleccionada.value + 'T00:00:00');
-                d.setDate(d.getDate() + 1);
-                fechaSeleccionada.value = d.toISOString().split('T')[0];
+        // Si la fecha actual no está dentro de fechasDisponibles, corregirla a la primera válida
+        if (fechaSeleccionada.value && fechasDisponibles.value.length > 0) {
+            const fechaExiste = fechasDisponibles.value.some(fd => fd.fecha === fechaSeleccionada.value);
+            if (!fechaExiste) {
+                fechaSeleccionada.value = fechasDisponibles.value[0].fecha;
                 return;
             }
         }
-        
-        maxIntentosBusqueda.value = 0;
 
     } catch (e) {
         console.error(e);
+        error.value = e.response?.data?.error || e.response?.data?.message || 'No se pudieron cargar los horarios en este momento. Por favor intente recargar la página.';
         maxIntentosBusqueda.value = 0;
     } finally {
         cargandoSlots.value = false;
@@ -360,6 +365,7 @@ const cargarSlots = async () => {
 watch(fechaSeleccionada, () => {
     slotSeleccionado.value = null;
     muelleSeleccionado.value = '';
+    error.value = '';
     if (fechaSeleccionada.value) cargarSlots();
 });
 
@@ -569,24 +575,26 @@ const cargarSlotsReprogramacion = async (cita) => {
         });
         repSlotsDisponibles.value = resp.data.slots;
         repFechasDisponibles.value = resp.data.fechas_disponibles;
-        if (!repFechaSeleccionada.value && resp.data.fechas_disponibles.length > 0) {
-            repFechaSeleccionada.value = resp.data.fechas_disponibles[0].fecha;
+        repSlotsDisponibles.value = resp.data.slots || [];
+        repFechasDisponibles.value = resp.data.fechas_disponibles || [];
+
+        if (!repFechaSeleccionada.value && repFechasDisponibles.value.length > 0) {
+            const tieneLibreHoy = repSlotsDisponibles.value.some(s => s.disponible);
+            if (!tieneLibreHoy && repFechasDisponibles.value.length > 1) {
+                repFechaSeleccionada.value = repFechasDisponibles.value[1].fecha;
+                return;
+            }
+            repFechaSeleccionada.value = repFechasDisponibles.value[0].fecha;
             return;
         }
 
-        // Auto-avanzar si todo está full
-        if (repFechaSeleccionada.value && repSlotsDisponibles.value.length > 0) {
-            const tieneLibre = repSlotsDisponibles.value.some(s => s.disponible);
-            if (!tieneLibre && maxIntentosReprogramacion.value < 14) {
-                maxIntentosReprogramacion.value++;
-                const d = new Date(repFechaSeleccionada.value + 'T00:00:00');
-                d.setDate(d.getDate() + 1);
-                repFechaSeleccionada.value = d.toISOString().split('T')[0];
+        if (repFechaSeleccionada.value && repFechasDisponibles.value.length > 0) {
+            const fechaExiste = repFechasDisponibles.value.some(fd => fd.fecha === repFechaSeleccionada.value);
+            if (!fechaExiste) {
+                repFechaSeleccionada.value = repFechasDisponibles.value[0].fecha;
                 return;
             }
         }
-
-        maxIntentosReprogramacion.value = 0;
 
     } catch (e) {
         console.error(e);
@@ -2130,20 +2138,32 @@ onMounted(cargarCitas);
                             </button>
                         </div>
                         
+                        <!-- Loading state -->
+                        <div v-if="cargandoSlots" class="py-12 flex flex-col items-center justify-center gap-3 text-slate-500">
+                            <div class="w-8 h-8 border-3 border-red-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span class="text-xs font-bold text-slate-500">Cargando fechas y horarios disponibles...</span>
+                        </div>
+
                         <!-- Fechas (reusamos la lista de fechas) -->
-                        <div class="flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide">
+                        <div v-else-if="fechasDisponibles.length > 0" class="flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide">
                             <button v-for="fd in fechasDisponibles" :key="fd.fecha" @click="fechaSeleccionada = fd.fecha"
                                 class="flex flex-col items-center justify-center min-w-[80px] p-3 rounded-2xl transition-all border"
-                                :class="fechaSeleccionada === fd.fecha ? 'bg-red-600 text-white border-red-600 shadow-md shadow-red-600/30' : 'bg-white text-slate-600 border-slate-200 hover:border-red-300 hover:bg-red-50'">
-                                <span class="text-xs font-bold uppercase opacity-80">{{ new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { weekday: 'short' }) }}</span>
-                                <span class="text-2xl font-black">{{ new Date(fd.fecha + 'T00:00:00').getDate() }}</span>
-                                <span class="text-[10px] font-bold uppercase opacity-80">{{ new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { month: 'short' }) }}</span>
+                                :class="fechaSeleccionada === fd.fecha ? 'bg-red-600 text-white border-red-600 shadow-md shadow-red-600/30 scale-105' : 'bg-white text-slate-600 border-slate-200 hover:border-red-300 hover:bg-red-50'">
+                                <span class="text-xs font-bold uppercase opacity-80">{{ fd.dia || new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { weekday: 'short' }) }}</span>
+                                <span class="text-2xl font-black">{{ fd.numero_dia || parseInt(fd.fecha.split('-')[2]) }}</span>
+                                <span class="text-[10px] font-bold uppercase opacity-80">{{ fd.mes || new Date(fd.fecha + 'T00:00:00').toLocaleDateString('es-VE', { month: 'short' }) }}</span>
                             </button>
                         </div>
 
                         <div v-if="fechaSeleccionada && new Date(fechaSeleccionada + 'T00:00:00').getDay() === 3" class="mb-4 p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-amber-900 text-xs flex items-center gap-2">
                             <span>ℹ️</span>
                             <span><strong>Horario especial de Miércoles:</strong> La recepción para proveedores externos es de 8:00 AM hasta las 11:00 AM. Turnos posteriores no disponibles.</span>
+                        </div>
+
+                        <!-- Aviso si no hay turnos disponibles para este día -->
+                        <div v-if="slotsDisponibles.length > 0 && !slotsDisponibles.some(s => s.disponible)" class="mb-4 p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-center gap-2">
+                            <span class="text-base">⚠️</span>
+                            <span><strong>Capacidad completa:</strong> Todos los turnos para este día están reservados o bloqueados. Por favor seleccione otra fecha en la barra superior.</span>
                         </div>
 
                         <!-- Slots (reusamos la lista de slots) -->

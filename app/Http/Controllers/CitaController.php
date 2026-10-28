@@ -123,22 +123,35 @@ class CitaController extends Controller
      */
     public static function esCerveceriaPolarOPepsi($proveedor, $numeroOc = null): bool
     {
-        $texto = mb_strtoupper(trim((string)$proveedor));
-        if (str_contains($texto, 'CERVECERIA') || str_contains($texto, 'PEPSI')) {
-            return true;
-        }
-        if (!empty($numeroOc)) {
-            $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
-            $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
-            $provSync = DB::table('erp_ordenes_sync')
-                ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
-                ->value('proveedor');
-            if ($provSync) {
-                $p = mb_strtoupper((string)$provSync);
-                if (str_contains($p, 'CERVECERIA') || str_contains($p, 'PEPSI')) {
-                    return true;
+        try {
+            $texto = mb_strtoupper(trim((string)$proveedor));
+            if (str_contains($texto, 'CERVECERIA') || str_contains($texto, 'PEPSI') || str_contains($texto, 'SUPLIALIMENTOS') || str_contains($texto, 'J500007604')) {
+                return true;
+            }
+            if (!empty($numeroOc)) {
+                $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
+                $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
+                $rowSync = DB::table('erp_ordenes_sync')
+                    ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
+                    ->first(['proveedor', 'resumen_json']);
+                if ($rowSync) {
+                    if (!empty($rowSync->proveedor)) {
+                        $p = mb_strtoupper((string)$rowSync->proveedor);
+                        if (str_contains($p, 'CERVECERIA') || str_contains($p, 'PEPSI') || str_contains($p, 'SUPLIALIMENTOS') || str_contains($p, 'J500007604')) {
+                            return true;
+                        }
+                    }
+                    if (!empty($rowSync->resumen_json)) {
+                        $resumen = json_decode($rowSync->resumen_json, true);
+                        $obs = $resumen['Observacion'] ?? $resumen['observacion'] ?? '';
+                        if (!empty($obs) && (str_contains(mb_strtoupper((string)$obs), 'PEPSI') || str_contains(mb_strtoupper((string)$obs), 'CERVECERIA'))) {
+                            return true;
+                        }
+                    }
                 }
             }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Error en esCerveceriaPolarOPepsi: " . $e->getMessage());
         }
         return false;
     }
@@ -148,25 +161,38 @@ class CitaController extends Controller
      */
     public static function esAlimentosPolar($proveedor, $numeroOc = null): bool
     {
-        $texto = mb_strtoupper(trim((string)$proveedor));
-        if (str_contains($texto, 'ALIMENTOS POLAR')) {
-            return true;
-        }
-        if (str_contains($texto, 'POLAR') && !str_contains($texto, 'CERVECERIA')) {
-            return true;
-        }
-        if (!empty($numeroOc)) {
-            $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
-            $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
-            $provSync = DB::table('erp_ordenes_sync')
-                ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
-                ->value('proveedor');
-            if ($provSync) {
-                $p = mb_strtoupper((string)$provSync);
-                if (str_contains($p, 'ALIMENTOS POLAR') || (str_contains($p, 'POLAR') && !str_contains($p, 'CERVECERIA'))) {
-                    return true;
+        try {
+            $texto = mb_strtoupper(trim((string)$proveedor));
+            if (str_contains($texto, 'ALIMENTOS POLAR')) {
+                return true;
+            }
+            if (str_contains($texto, 'POLAR') && !str_contains($texto, 'CERVECERIA')) {
+                return true;
+            }
+            if (!empty($numeroOc)) {
+                $numLimpio = preg_replace('/[^0-9]/', '', $numeroOc);
+                $numPad = str_pad($numLimpio, 9, '0', STR_PAD_LEFT);
+                $rowSync = DB::table('erp_ordenes_sync')
+                    ->whereIn('numero_oc', [$numeroOc, $numLimpio, $numPad, 'E' . $numPad])
+                    ->first(['proveedor', 'resumen_json']);
+                if ($rowSync) {
+                    if (!empty($rowSync->proveedor)) {
+                        $p = mb_strtoupper((string)$rowSync->proveedor);
+                        if (str_contains($p, 'ALIMENTOS POLAR') || (str_contains($p, 'POLAR') && !str_contains($p, 'CERVECERIA'))) {
+                            return true;
+                        }
+                    }
+                    if (!empty($rowSync->resumen_json)) {
+                        $resumen = json_decode($rowSync->resumen_json, true);
+                        $obs = $resumen['Observacion'] ?? $resumen['observacion'] ?? '';
+                        if (!empty($obs) && str_contains(mb_strtoupper((string)$obs), 'ALIMENTOS POLAR')) {
+                            return true;
+                        }
+                    }
                 }
             }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Error en esAlimentosPolar: " . $e->getMessage());
         }
         return false;
     }
@@ -242,6 +268,7 @@ class CitaController extends Controller
         $carbonFecha = Carbon::parse($fecha, $timezone);
         $esHoy = $carbonFecha->isSameDay($ahora);
         $esPasado = $carbonFecha->lt($ahora->copy()->startOfDay());
+        $esDomingo = ($carbonFecha->dayOfWeek === Carbon::SUNDAY);
         $esMiercoles = ($carbonFecha->dayOfWeek === Carbon::WEDNESDAY);
         $esSabado = ($carbonFecha->dayOfWeek === Carbon::SATURDAY);
         $esMartes = ($carbonFecha->dayOfWeek === Carbon::TUESDAY);
@@ -292,8 +319,11 @@ class CitaController extends Controller
                 $bloqueadoPorHorario = false;
                 $motivoBloqueo = null;
 
-                // 0. BLOQUEO ESTRICTO: Horas que ya transcurrieron hoy o fechas pasadas
-                if ($esPasado) {
+                // 0. BLOQUEO ESTRICTO: Domingo no laborable, horas pasadas o jornada concluida
+                if ($esDomingo) {
+                    $bloqueadoPorHorario = true;
+                    $motivoBloqueo = 'No se reciben reservaciones los domingos.';
+                } elseif ($esPasado) {
                     $bloqueadoPorHorario = true;
                     $motivoBloqueo = 'Fecha ya transcurrida.';
                 } elseif ($esHoy && $slotInicio->lte($ahora)) {
@@ -313,20 +343,59 @@ class CitaController extends Controller
                             $bloqueadoPorHorario = true;
                             $motivoBloqueo = 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.';
                         }
-                        // 3. Reglas especiales POLAR Martes y Viernes en Hiper Suraki
+                        // 3. Reglas especiales POLAR Martes y Viernes en Hiper Suraki (Flexibilidad inteligente si no hay choque)
                         elseif ($esMartesOViernes && $esHiper) {
-                            // 08:00 AM a 10:00 AM: Reservado para Cervecería Polar / Pepsi
+                            // 08:00 AM a 10:00 AM: Preferencia Cervecería Polar / Pepsi
                             if ($h >= 8 && $h < 10) {
                                 if (!$esPepsiOCerveceria) {
-                                    $bloqueadoPorHorario = true;
-                                    $motivoBloqueo = 'Horario de 8:00 AM a 10:00 AM reservado exclusivamente para Cervecería Polar / Pepsi.';
+                                    $polarManana = $citasExistentes->first(function($c) use ($timezone) {
+                                        if (!self::esCerveceriaPolarOPepsi($c->proveedor, $c->numero_oc)) return false;
+                                        $ini = \Carbon\Carbon::parse($c->fecha_cita, $timezone);
+                                        return $ini->hour >= 8 && $ini->hour < 10;
+                                    });
+
+                                    $permitirSlot = false;
+                                    if ($polarManana) {
+                                        // Si Polar ya agendó y terminó antes de este slot, el muelle queda libre
+                                        $finPolar = \Carbon\Carbon::parse($polarManana->fecha_cita, $timezone)->addMinutes((int)($polarManana->duracion_minutos ?? 60));
+                                        if ($slotInicio->gte($finPolar)) {
+                                            $permitirSlot = true;
+                                        }
+                                    } elseif ($slotInicio->format('H:i') >= '09:30') {
+                                        // Si Polar no ha agendado aún, reservamos de 8:00 a 9:30 pero liberamos las 9:30 en adelante
+                                        $permitirSlot = true;
+                                    }
+
+                                    if (!$permitirSlot) {
+                                        $bloqueadoPorHorario = true;
+                                        $motivoBloqueo = 'Horario de 8:00 AM a 10:00 AM reservado para Cervecería Polar / Pepsi.';
+                                    }
                                 }
                             }
-                            // 12:00 PM a 02:00 PM (12:00 a 14:00): Reservado para Alimentos Polar
+                            // 12:00 PM a 02:00 PM (12:00 a 14:00): Preferencia Alimentos Polar
                             elseif ($h >= 12 && $h < 14) {
                                 if (!$esAlimentosPolar) {
-                                    $bloqueadoPorHorario = true;
-                                    $motivoBloqueo = 'Horario de 12:00 PM a 2:00 PM reservado exclusivamente para Alimentos Polar.';
+                                    $polarTarde = $citasExistentes->first(function($c) use ($timezone) {
+                                        if (!self::esAlimentosPolar($c->proveedor, $c->numero_oc)) return false;
+                                        $ini = \Carbon\Carbon::parse($c->fecha_cita, $timezone);
+                                        return $ini->hour >= 12 && $ini->hour < 14;
+                                    });
+
+                                    $permitirSlotTarde = false;
+                                    if ($polarTarde) {
+                                        // Si Alimentos Polar ya agendó y terminó antes de este slot
+                                        $finPolarT = \Carbon\Carbon::parse($polarTarde->fecha_cita, $timezone)->addMinutes((int)($polarTarde->duracion_minutos ?? 60));
+                                        if ($slotInicio->gte($finPolarT)) {
+                                            $permitirSlotTarde = true;
+                                        }
+                                    } elseif ($slotInicio->format('H:i') >= '13:30') {
+                                        $permitirSlotTarde = true;
+                                    }
+
+                                    if (!$permitirSlotTarde) {
+                                        $bloqueadoPorHorario = true;
+                                        $motivoBloqueo = 'Horario de 12:00 PM a 2:00 PM reservado para Alimentos Polar.';
+                                    }
                                 }
                             }
                         }
@@ -409,11 +478,15 @@ class CitaController extends Controller
                     }
 
                     if ($minutosHastaProxima !== null) {
-                        if ($minutosHastaProxima < 45) {
+                        if ($duracionMinutos <= $minutosHastaProxima) {
+                            // Cabe completamente antes de que inicie la siguiente cita
+                            $duracionEfectivaSlot = $duracionMinutos;
+                        } elseif ($minutosHastaProxima >= 45) {
+                            // Excede la ventana pero hay al menos 45 min libres para ajuste dinámico
+                            $duracionEfectivaSlot = $minutosHastaProxima;
+                        } else {
                             $citaSolapada = $proximaCita;
                             $motivoOcupado = "Espacio insuficiente ({$minutosHastaProxima} min libres antes de la siguiente recepción)";
-                        } else {
-                            $duracionEfectivaSlot = min($duracionMinutos, $minutosHastaProxima);
                         }
                     }
                 }
@@ -453,6 +526,8 @@ class CitaController extends Controller
             $fechasDisponibles[] = [
                 'fecha' => $d->format('Y-m-d'),
                 'dia' => $d->isoFormat('ddd'),
+                'numero_dia' => $d->format('d'),
+                'mes' => $d->isoFormat('MMM'),
                 'dia_largo' => $d->isoFormat('dddd D [de] MMMM'),
                 'es_hoy' => $d->isToday(),
                 'es_miercoles' => $d->dayOfWeek === Carbon::WEDNESDAY,
@@ -555,7 +630,7 @@ class CitaController extends Controller
             if ($fechaCita->dayOfWeek === Carbon::WEDNESDAY && $fechaCita->hour >= 11) {
                 return response()->json(['error' => 'Los días miércoles la recepción de proveedores externos es únicamente hasta las 11:00 AM.'], 422);
             }
-            // Reglas especiales Martes y Viernes para POLAR en Hiper Suraki
+            // Reglas especiales Martes y Viernes para POLAR en Hiper Suraki (Flexibilidad inteligente)
             if ($esMartesOViernes && $esHiper) {
                 $horaH = $fechaCita->hour;
                 $provNombre = $validated['proveedor'] ?? '';
@@ -563,15 +638,51 @@ class CitaController extends Controller
 
                 if ($horaH >= 8 && $horaH < 10) {
                     if (!self::esCerveceriaPolarOPepsi($provNombre, $numOc)) {
-                        return response()->json([
-                            'error' => 'Los días martes y viernes de 08:00 AM a 10:00 AM el andén está reservado exclusivamente para recepción de Cervecería Polar y Pepsi.'
-                        ], 422);
+                        $polarManana = $citasExistentes->first(function($c) use ($timezone) {
+                            if (!self::esCerveceriaPolarOPepsi($c->proveedor, $c->numero_oc)) return false;
+                            $ini = \Carbon\Carbon::parse($c->fecha_cita, $timezone);
+                            return $ini->hour >= 8 && $ini->hour < 10;
+                        });
+
+                        $permitido = false;
+                        if ($polarManana) {
+                            $finPolar = \Carbon\Carbon::parse($polarManana->fecha_cita, $timezone)->addMinutes((int)($polarManana->duracion_minutos ?? 60));
+                            if ($fechaCita->gte($finPolar)) {
+                                $permitido = true;
+                            }
+                        } elseif ($fechaCita->format('H:i') >= '09:30') {
+                            $permitido = true;
+                        }
+
+                        if (!$permitido) {
+                            return response()->json([
+                                'error' => 'Los días martes y viernes de 08:00 AM a 10:00 AM el andén está reservado para recepción de Cervecería Polar y Pepsi.'
+                            ], 422);
+                        }
                     }
                 } elseif ($horaH >= 12 && $horaH < 14) {
                     if (!self::esAlimentosPolar($provNombre, $numOc)) {
-                        return response()->json([
-                            'error' => 'Los días martes y viernes de 12:00 PM a 02:00 PM el andén está reservado exclusivamente para recepción de Alimentos Polar.'
-                        ], 422);
+                        $polarTarde = $citasExistentes->first(function($c) use ($timezone) {
+                            if (!self::esAlimentosPolar($c->proveedor, $c->numero_oc)) return false;
+                            $ini = \Carbon\Carbon::parse($c->fecha_cita, $timezone);
+                            return $ini->hour >= 12 && $ini->hour < 14;
+                        });
+
+                        $permitidoTarde = false;
+                        if ($polarTarde) {
+                            $finPolarT = \Carbon\Carbon::parse($polarTarde->fecha_cita, $timezone)->addMinutes((int)($polarTarde->duracion_minutos ?? 60));
+                            if ($fechaCita->gte($finPolarT)) {
+                                $permitidoTarde = true;
+                            }
+                        } elseif ($fechaCita->format('H:i') >= '13:30') {
+                            $permitidoTarde = true;
+                        }
+
+                        if (!$permitidoTarde) {
+                            return response()->json([
+                                'error' => 'Los días martes y viernes de 12:00 PM a 02:00 PM el andén está reservado para recepción de Alimentos Polar.'
+                            ], 422);
+                        }
                     }
                 }
             }
