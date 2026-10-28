@@ -61,18 +61,34 @@ class LoginRequest extends FormRequest
                 })->first();
 
             if ($hasSync) {
-                $existingUser = \App\Models\User::where('username', $loginClean)->orWhere('rif', $loginClean)->first();
+                $canonicalRif = !empty($hasSync->rif_proveedor) ? strtoupper(preg_replace('/[^A-Z0-9]/i', '', explode('.', $hasSync->rif_proveedor)[0])) : $loginClean;
+                $existingUser = \App\Models\User::where('username', $loginClean)
+                    ->orWhere('rif', $loginClean)
+                    ->orWhere('username', $canonicalRif)
+                    ->orWhere('rif', $canonicalRif)
+                    ->first();
                 if (!$existingUser) {
                     \App\Models\User::create([
-                        'name' => $hasSync->proveedor ?: 'Proveedor ' . $loginClean,
-                        'username' => $loginClean,
-                        'rif' => $loginClean,
-                        'email' => strtolower($loginClean) . '@proveedor.suraki.net',
+                        'name' => $hasSync->proveedor ?: 'Proveedor ' . $canonicalRif,
+                        'username' => $canonicalRif,
+                        'rif' => $canonicalRif,
+                        'email' => strtolower($canonicalRif) . '@proveedor.suraki.net',
                         'role' => 'proveedor',
                         'password' => \Illuminate\Support\Facades\Hash::make($password ?: $loginClean),
                     ]);
-                    $authenticated = Auth::attempt(['username' => $loginClean, 'password' => $password], $remember)
+                    $authenticated = Auth::attempt(['username' => $canonicalRif, 'password' => $password], $remember)
+                                  || Auth::attempt(['username' => $canonicalRif, 'password' => $loginClean], $remember)
+                                  || Auth::attempt(['username' => $loginClean, 'password' => $password], $remember)
                                   || Auth::attempt(['username' => $loginClean, 'password' => $loginClean], $remember);
+                } else {
+                    // Si el usuario existe pero su RIF no tenía prefijo canónico, actualizarlo
+                    if (!empty($canonicalRif) && $existingUser->rif !== $canonicalRif) {
+                        \App\Models\User::where('id', $existingUser->id)->update(['rif' => $canonicalRif]);
+                    }
+                    $authenticated = Auth::attempt(['username' => $existingUser->username, 'password' => $password], $remember)
+                                  || Auth::attempt(['rif' => $existingUser->rif, 'password' => $password], $remember)
+                                  || Auth::attempt(['username' => $existingUser->username, 'password' => $loginClean], $remember)
+                                  || Auth::attempt(['rif' => $canonicalRif, 'password' => $password], $remember);
                 }
             }
         }

@@ -2419,11 +2419,27 @@ class CitaController extends Controller
             return strtoupper(preg_replace('/[^A-Z0-9]/i', '', trim($parts[0] ?? '')));
         };
 
+        $soloDigitos = function($val) {
+            return preg_replace('/[^0-9]/', '', $val ?? '');
+        };
+
         $userRifLimpio = $limpiarRif($rawRif);
+        $userDigits = $soloDigitos($userRifLimpio);
         
         if (empty($userRifLimpio)) {
             return response()->json(['ordenes' => []]);
         }
+
+        $coincideRif = function($rifTarget) use ($userRifLimpio, $userDigits, $limpiarRif, $soloDigitos) {
+            if (empty($rifTarget)) return false;
+            $targetLimpio = $limpiarRif($rifTarget);
+            if ($targetLimpio === $userRifLimpio) return true;
+            $targetDigits = $soloDigitos($targetLimpio);
+            if (!empty($userDigits) && !empty($targetDigits) && $userDigits === $targetDigits) {
+                return true;
+            }
+            return false;
+        };
         
         // Buscar en erp_ordenes_sync las órdenes habilitadas
         $ordenes = DB::table('erp_ordenes_sync')
@@ -2445,29 +2461,23 @@ class CitaController extends Controller
             $rifMatch = false;
             
             // 1. Columna dedicada rif_proveedor (más confiable, no se sobrescribe en sync)
-            if (!empty($o->rif_proveedor) && $limpiarRif($o->rif_proveedor) === $userRifLimpio) {
+            if (!empty($o->rif_proveedor) && $coincideRif($o->rif_proveedor)) {
                 $rifMatch = true;
             }
             
             // 2. Codigo_Proveedor en resumen_json
-            if (!$rifMatch && !empty($resumen['Codigo_Proveedor'])) {
-                if ($limpiarRif($resumen['Codigo_Proveedor']) === $userRifLimpio) {
-                    $rifMatch = true;
-                }
+            if (!$rifMatch && !empty($resumen['Codigo_Proveedor']) && $coincideRif($resumen['Codigo_Proveedor'])) {
+                $rifMatch = true;
             }
             
             // 3. c_RIF en resumen_json (campo del ERP)
-            if (!$rifMatch && !empty($resumen['c_RIF'])) {
-                if ($limpiarRif($resumen['c_RIF']) === $userRifLimpio) {
-                    $rifMatch = true;
-                }
+            if (!$rifMatch && !empty($resumen['c_RIF']) && $coincideRif($resumen['c_RIF'])) {
+                $rifMatch = true;
             }
             
             // 4. Codigo_Proveedor formateado como RIF puro en resumen (v2)
-            if (!$rifMatch && !empty($resumen['Cod_Proveedor'])) {
-                if ($limpiarRif($resumen['Cod_Proveedor']) === $userRifLimpio) {
-                    $rifMatch = true;
-                }
+            if (!$rifMatch && !empty($resumen['Cod_Proveedor']) && $coincideRif($resumen['Cod_Proveedor'])) {
+                $rifMatch = true;
             }
 
             if (!$rifMatch) continue;
